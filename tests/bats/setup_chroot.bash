@@ -122,3 +122,19 @@ run_in_chroot() {
 skfl_in_chroot() {
     chroot "$CHROOT" /bin/sh -c "cd $REPO && /usr/local/bin/python3 /usr/local/bin/skfl $*"
 }
+
+# vet_file_in_chroot REL_PATH
+#   Simulate vetting a source file by writing its SHA256 hash to 20_vetted/.
+vet_file_in_chroot() {
+    local rel="$1"
+    chroot "$CHROOT" /usr/local/bin/python3 -c "
+import hashlib
+from pathlib import Path
+rel = '${rel}'
+src = Path('${REPO}/10_sources') / rel
+h = hashlib.sha256(src.read_bytes()).hexdigest()
+dst = Path('${REPO}/20_vetted') / rel
+dst.parent.mkdir(parents=True, exist_ok=True)
+dst.write_text(h + '\n')
+"
+}

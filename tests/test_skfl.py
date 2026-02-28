@@ -60,14 +60,11 @@ def repo_with_vetted(repo_with_source):
     """Provide a repo with custom source files that have been vetted."""
     repo = repo_with_source
     sources = repo / skfl.SOURCES_DIR
-    vetted = repo / skfl.VETTED_DIR
-    # Manually vet all files (simulating interactive approval)
+    # Manually vet all files by storing their hashes
     for src_file in sources.rglob("*"):
         if src_file.is_file() and src_file.name != ".gitkeep":
             rel = src_file.relative_to(sources)
-            dst = vetted / rel
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_file, dst)
+            skfl.write_vetted_hash(repo, rel, skfl.file_hash(src_file))
     return repo
 
 
@@ -330,9 +327,9 @@ class TestVetCommand:
         assert result.exit_code == 0
         assert "vetted" in result.output
 
-        # Verify the vetted snapshot was created
-        vetted = repo_with_source / skfl.VETTED_DIR / "custom/test-src/hello.md"
-        assert vetted.exists()
+        # Verify the vetted hash was stored
+        rel = Path("custom/test-src/hello.md")
+        assert skfl.read_vetted_hash(repo_with_source, rel) is not None
 
     def test_vet_unvetted_reject(self, repo_with_source):
         runner = CliRunner()
@@ -343,8 +340,9 @@ class TestVetCommand:
         assert result.exit_code == 0
         assert "Skipping" in result.output
 
-        vetted = repo_with_source / skfl.VETTED_DIR / "custom/test-src/hello.md"
-        assert not vetted.exists()
+        # Verify no hash was stored
+        rel = Path("custom/test-src/hello.md")
+        assert skfl.read_vetted_hash(repo_with_source, rel) is None
 
     def test_vet_modified_approve(self, repo_with_vetted):
         rel = Path("custom/test-src/hello.md")
@@ -359,9 +357,9 @@ class TestVetCommand:
         assert result.exit_code == 0
         assert "vetted" in result.output
 
-        # Verify vetted snapshot was updated
-        vetted = repo_with_vetted / skfl.VETTED_DIR / rel
-        assert vetted.read_text() == "# Hello Updated\n"
+        # Verify vetted hash was updated to match new source
+        rel = Path("custom/test-src/hello.md")
+        assert skfl.read_vetted_hash(repo_with_vetted, rel) == skfl.file_hash(source)
 
     def test_vet_nonexistent_file(self, repo_with_source):
         runner = CliRunner()
@@ -626,7 +624,7 @@ class TestStageCommand:
         rel = Path("custom/test-src/hello.md")
 
         # Create a valid patch
-        original = (repo / skfl.VETTED_DIR / rel).read_bytes()
+        original = (repo / skfl.SOURCES_DIR / rel).read_bytes()
         modified = original.replace(b"World", b"Universe")
         orig_f = tmp_path / "orig"
         new_f = tmp_path / "new"
@@ -924,7 +922,7 @@ class TestStageWithProfile:
     def test_stage_profiles_apply_different_patches(self, repo_with_vetted, tmp_path):
         repo = repo_with_vetted
         rel = Path("custom/test-src/hello.md")
-        original = (repo / skfl.VETTED_DIR / rel).read_bytes()
+        original = (repo / skfl.SOURCES_DIR / rel).read_bytes()
         runner = CliRunner()
 
         # Default patch: World -> Earth
@@ -997,8 +995,8 @@ class TestStageWithProfile:
 
         rel_md = Path("custom/test-src/hello.md")
         rel_py = Path("custom/test-src/script.py")
-        original_md = (repo / skfl.VETTED_DIR / rel_md).read_bytes()
-        original_py = (repo / skfl.VETTED_DIR / rel_py).read_bytes()
+        original_md = (repo / skfl.SOURCES_DIR / rel_md).read_bytes()
+        original_py = (repo / skfl.SOURCES_DIR / rel_py).read_bytes()
 
         # Profile patch for hello.md only
         md_patch = _make_patch(

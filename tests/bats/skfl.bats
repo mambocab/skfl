@@ -150,8 +150,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'content' > /tmp/src/file.md"
     skfl_in_chroot source custom test /tmp/src
-    # Manually vet by copying to vetted dir
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.md $REPO/20_vetted/custom/test/file.md"
+    vet_file_in_chroot custom/test/file.md
     run skfl_in_chroot vet status
     [ "$status" -eq 0 ]
     [[ "$output" == *"vetted"* ]]
@@ -161,8 +160,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'original' > /tmp/src/file.md"
     skfl_in_chroot source custom test /tmp/src
-    # Vet the file
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.md $REPO/20_vetted/custom/test/file.md"
+    vet_file_in_chroot custom/test/file.md
     # Modify the source
     chroot "$CHROOT" /bin/sh -c "echo 'modified' > $REPO/10_sources/custom/test/file.md"
     run skfl_in_chroot vet status
@@ -193,7 +191,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'content' > /tmp/src/file.md"
     skfl_in_chroot source custom test /tmp/src
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.md $REPO/20_vetted/custom/test/file.md"
+    vet_file_in_chroot custom/test/file.md
     run skfl_in_chroot vet custom/test/file.md
     [ "$status" -eq 0 ]
     [[ "$output" == *"already vetted"* ]]
@@ -263,8 +261,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'hello world' > /tmp/src/file.md"
     skfl_in_chroot source custom test /tmp/src
-    # Vet the file
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.md $REPO/20_vetted/custom/test/file.md"
+    vet_file_in_chroot custom/test/file.md
     run skfl_in_chroot stage custom/test/file.md
     [ "$status" -eq 0 ]
     [[ "$output" == *"staged"* ]]
@@ -287,8 +284,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'original' > /tmp/src/file.md"
     skfl_in_chroot source custom test /tmp/src
-    # Vet
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.md $REPO/20_vetted/custom/test/file.md"
+    vet_file_in_chroot custom/test/file.md
     # Modify source
     chroot "$CHROOT" /bin/sh -c "echo 'changed' > $REPO/10_sources/custom/test/file.md"
     run skfl_in_chroot stage custom/test/file.md
@@ -300,13 +296,12 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && printf 'line1\nline2\nline3\n' > /tmp/src/file.txt"
     skfl_in_chroot source custom test /tmp/src
-    # Vet
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.txt $REPO/20_vetted/custom/test/file.txt"
+    vet_file_in_chroot custom/test/file.txt
     # Create a patch using diff inside chroot
     chroot "$CHROOT" /bin/sh -c "
         printf 'line1\nLINE2\nline3\n' > /tmp/modified.txt
         mkdir -p '$REPO/30_patches/custom/test/file.txt.d'
-        diff -u $REPO/20_vetted/custom/test/file.txt /tmp/modified.txt > '$REPO/30_patches/custom/test/file.txt.d/001-uppercase.patch' || true
+        diff -u $REPO/10_sources/custom/test/file.txt /tmp/modified.txt > '$REPO/30_patches/custom/test/file.txt.d/001-uppercase.patch' || true
     "
     run skfl_in_chroot stage custom/test/file.txt
     [ "$status" -eq 0 ]
@@ -321,13 +316,12 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && printf 'aaa\nbbb\nccc\n' > /tmp/src/file.txt"
     skfl_in_chroot source custom test /tmp/src
-    # Vet
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.txt $REPO/20_vetted/custom/test/file.txt"
+    vet_file_in_chroot custom/test/file.txt
     # Patch 1: bbb -> BBB
     chroot "$CHROOT" /bin/sh -c "
         printf 'aaa\nBBB\nccc\n' > /tmp/p1.txt
         mkdir -p '$REPO/30_patches/custom/test/file.txt.d'
-        diff -u $REPO/20_vetted/custom/test/file.txt /tmp/p1.txt > '$REPO/30_patches/custom/test/file.txt.d/001-first.patch' || true
+        diff -u $REPO/10_sources/custom/test/file.txt /tmp/p1.txt > '$REPO/30_patches/custom/test/file.txt.d/001-first.patch' || true
     "
     # Patch 2: ccc -> CCC (on top of patch 1 result)
     chroot "$CHROOT" /bin/sh -c "
@@ -356,7 +350,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'content' > /tmp/src/file.md"
     skfl_in_chroot source custom test /tmp/src
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.md $REPO/20_vetted/custom/test/file.md"
+    vet_file_in_chroot custom/test/file.md
     skfl_in_chroot stage custom/test/file.md
     run skfl_in_chroot stage list
     [ "$status" -eq 0 ]
@@ -374,7 +368,7 @@ teardown() {
     run skfl_in_chroot vet status
     [[ "$output" == *"unvetted"* ]]
     # Vet (simulate)
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/my-skills && cp $REPO/10_sources/custom/my-skills/skill.md $REPO/20_vetted/custom/my-skills/skill.md"
+    vet_file_in_chroot custom/my-skills/skill.md
     # Verify vetted
     run skfl_in_chroot vet status
     [[ "$output" == *"vetted"* ]]
@@ -391,13 +385,12 @@ teardown() {
     # Add source
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && printf 'line1\nline2\n' > /tmp/src/file.txt"
     skfl_in_chroot source custom test /tmp/src
-    # Vet
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.txt $REPO/20_vetted/custom/test/file.txt"
+    vet_file_in_chroot custom/test/file.txt
     # Create patch
     chroot "$CHROOT" /bin/sh -c "
         printf 'line1\nline2 patched\n' > /tmp/patched.txt
         mkdir -p '$REPO/30_patches/custom/test/file.txt.d'
-        diff -u $REPO/20_vetted/custom/test/file.txt /tmp/patched.txt > '$REPO/30_patches/custom/test/file.txt.d/001-fix.patch' || true
+        diff -u $REPO/10_sources/custom/test/file.txt /tmp/patched.txt > '$REPO/30_patches/custom/test/file.txt.d/001-fix.patch' || true
     "
     # Stage
     run skfl_in_chroot stage custom/test/file.txt
@@ -413,8 +406,7 @@ teardown() {
     # Initial source
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'v1' > /tmp/src/file.txt"
     skfl_in_chroot source custom test /tmp/src
-    # Vet
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.txt $REPO/20_vetted/custom/test/file.txt"
+    vet_file_in_chroot custom/test/file.txt
     # Stage should work
     run skfl_in_chroot stage custom/test/file.txt
     [ "$status" -eq 0 ]
@@ -425,7 +417,7 @@ teardown() {
     [ "$status" -ne 0 ]
     [[ "$output" == *"modified"* ]]
     # Re-vet
-    chroot "$CHROOT" /bin/sh -c "cp $REPO/10_sources/custom/test/file.txt $REPO/20_vetted/custom/test/file.txt"
+    vet_file_in_chroot custom/test/file.txt
     # Stage should work again
     run skfl_in_chroot stage custom/test/file.txt
     [ "$status" -eq 0 ]
@@ -445,7 +437,7 @@ teardown() {
     # Create a file with specific content including special characters
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && printf 'line 1\n\ttabbed\n  spaced\nend\n' > /tmp/src/special.txt"
     skfl_in_chroot source custom test /tmp/src
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/special.txt $REPO/20_vetted/custom/test/special.txt"
+    vet_file_in_chroot custom/test/special.txt
     skfl_in_chroot stage custom/test/special.txt
     # Compare staged vs source byte-for-byte
     run chroot "$CHROOT" /usr/bin/diff "$REPO/10_sources/custom/test/special.txt" "$REPO/40_staged/custom/test/special.txt"
@@ -467,19 +459,16 @@ teardown() {
     skfl_in_chroot source custom acme /tmp/src
 
     # Vet all files
-    chroot "$CHROOT" /bin/sh -c "
-        mkdir -p $REPO/20_vetted/custom/acme/skills
-        cp $REPO/10_sources/custom/acme/skills/config.txt   $REPO/20_vetted/custom/acme/skills/config.txt
-        cp $REPO/10_sources/custom/acme/skills/pipeline.txt $REPO/20_vetted/custom/acme/skills/pipeline.txt
-        cp $REPO/10_sources/custom/acme/skills/readme.md    $REPO/20_vetted/custom/acme/skills/readme.md
-    "
+    vet_file_in_chroot custom/acme/skills/config.txt
+    vet_file_in_chroot custom/acme/skills/pipeline.txt
+    vet_file_in_chroot custom/acme/skills/readme.md
 
     # --- Default patches (shared across all profiles) ---
     # Default patch on config.txt: change greeting from hello to hi
     chroot "$CHROOT" /bin/sh -c "
         printf 'greeting: hi\ntarget: world\nmode: default\n' > /tmp/config-default.txt
         mkdir -p '$REPO/30_patches/custom/acme/skills/config.txt.d'
-        diff -u $REPO/20_vetted/custom/acme/skills/config.txt /tmp/config-default.txt \
+        diff -u $REPO/10_sources/custom/acme/skills/config.txt /tmp/config-default.txt \
             > '$REPO/30_patches/custom/acme/skills/config.txt.d/001-short-greeting.patch' || true
     "
 
@@ -496,7 +485,7 @@ teardown() {
     chroot "$CHROOT" /bin/sh -c "
         printf 'step1: fetch\nstep2: analyze\nstep3: output\n' > /tmp/pipeline-claude.txt
         mkdir -p '$REPO/30_patches/_profiles/claude/custom/acme/skills/pipeline.txt.d'
-        diff -u $REPO/20_vetted/custom/acme/skills/pipeline.txt /tmp/pipeline-claude.txt \
+        diff -u $REPO/10_sources/custom/acme/skills/pipeline.txt /tmp/pipeline-claude.txt \
             > '$REPO/30_patches/_profiles/claude/custom/acme/skills/pipeline.txt.d/001-claude-analyze.patch' || true
     "
 
@@ -513,7 +502,7 @@ teardown() {
     chroot "$CHROOT" /bin/sh -c "
         printf 'step1: download\nstep2: process\nstep3: output\n' > /tmp/pipeline-kiro1.txt
         mkdir -p '$REPO/30_patches/_profiles/kiro/custom/acme/skills/pipeline.txt.d'
-        diff -u $REPO/20_vetted/custom/acme/skills/pipeline.txt /tmp/pipeline-kiro1.txt \
+        diff -u $REPO/10_sources/custom/acme/skills/pipeline.txt /tmp/pipeline-kiro1.txt \
             > '$REPO/30_patches/_profiles/kiro/custom/acme/skills/pipeline.txt.d/001-kiro-download.patch' || true
     "
     chroot "$CHROOT" /bin/sh -c "
@@ -593,7 +582,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'content' > /tmp/src/file.txt"
     skfl_in_chroot source custom test /tmp/src
-    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.txt $REPO/20_vetted/custom/test/file.txt"
+    vet_file_in_chroot custom/test/file.txt
     # Stage to two profiles and default
     skfl_in_chroot stage custom/test/file.txt
     skfl_in_chroot stage --as alpha custom/test/file.txt

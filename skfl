@@ -126,15 +126,30 @@ def apply_patches(source_content: bytes, patches: list[Path]) -> bytes:
     return result
 
 
+def read_vetted_hash(repo: Path, rel: Path) -> str | None:
+    """Read the stored vetted hash for a source file, or None if unvetted."""
+    vetted_path = repo / VETTED_DIR / rel
+    if not vetted_path.is_file():
+        return None
+    return vetted_path.read_text().strip()
+
+
+def write_vetted_hash(repo: Path, rel: Path, hash_str: str) -> None:
+    """Write a vetted hash file for a source file."""
+    vetted_path = repo / VETTED_DIR / rel
+    vetted_path.parent.mkdir(parents=True, exist_ok=True)
+    vetted_path.write_text(hash_str + "\n")
+
+
 def vet_status_for_file(repo: Path, rel: Path) -> str:
     """Return vetting status: 'vetted', 'modified', or 'unvetted'."""
     source_path = repo / SOURCES_DIR / rel
-    vetted_path = repo / VETTED_DIR / rel
     if not source_path.is_file():
         return "missing"
-    if not vetted_path.is_file():
+    stored_hash = read_vetted_hash(repo, rel)
+    if stored_hash is None:
         return "unvetted"
-    if file_hash(source_path) == file_hash(vetted_path):
+    if file_hash(source_path) == stored_hash:
         return "vetted"
     return "modified"
 
@@ -166,31 +181,30 @@ def do_vet_files(repo: Path, files: list[str]) -> None:
         if not source_path.is_file():
             raise click.ClickException(f"Source file not found: {source_path}")
 
-        vetted_path = repo / VETTED_DIR / rel
         status = vet_status_for_file(repo, rel)
 
         if status == "vetted":
             click.echo(f"  {rel}: already vetted (unchanged)")
             continue
 
+        pager = "less"
+        if str(rel).endswith(".md") and shutil.which("glow"):
+            pager = "glow"
+
         if status == "modified":
-            click.echo(f"  {rel}: source has changed since last vet. Showing diff:")
-            subprocess.run(["diff", "-u", str(vetted_path), str(source_path)])
+            click.echo(f"  {rel}: source has changed since last vet. Opening in pager for review...")
+            subprocess.run([pager, str(source_path)])
             if not click.confirm(f"  Approve changes to {rel}?"):
                 click.echo(f"  Skipping {rel}.")
                 continue
         else:
-            pager = "less"
-            if str(rel).endswith(".md") and shutil.which("glow"):
-                pager = "glow"
             click.echo(f"  {rel}: unvetted. Opening in pager...")
             subprocess.run([pager, str(source_path)])
             if not click.confirm(f"  Mark {rel} as vetted?"):
                 click.echo(f"  Skipping {rel}.")
                 continue
 
-        vetted_path.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source_path, vetted_path)
+        write_vetted_hash(repo, rel, file_hash(source_path))
         click.echo(f"  {rel}: vetted.")
 
 
@@ -220,8 +234,7 @@ def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> 
                 f"Run 'skfl vet {rel}' to review changes."
             )
 
-        vetted_path = repo / VETTED_DIR / rel
-        content = vetted_path.read_bytes()
+        content = source_path.read_bytes()
 
         patches = list_patches_for(repo, rel, profile=profile)
         if patches:
@@ -520,6 +533,11 @@ def patch_create(source_file, name):
         raise click.ClickException(
             f"File {rel} has not been vetted. Run 'skfl vet {rel}' first."
         )
+    if status == "modified":
+        raise click.ClickException(
+            f"File {rel} has been modified since last vet. "
+            f"Run 'skfl vet {rel}' to review changes."
+        )
 
     pdir = patches_dir_for(r, rel)
     existing = list_patches_for(r, rel)
@@ -530,8 +548,7 @@ def patch_create(source_file, name):
     safe_name = name.replace(" ", "-").replace("/", "-")
     patch_name = f"{next_num:03d}-{safe_name}.patch"
 
-    vetted_path = r / VETTED_DIR / rel
-    base_content = vetted_path.read_bytes()
+    base_content = src.read_bytes()
     if existing:
         base_content = apply_patches(base_content, existing)
 
