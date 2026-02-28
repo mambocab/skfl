@@ -187,6 +187,73 @@ def expand_paths(repo: Path, fpaths: list[str]) -> list[str]:
     return result
 
 
+def _collect_symlinks(pkg_dir: Path, current: Path, result: list) -> None:
+    """Recursively collect (source_abs, dest_rel) pairs from symlinks in a package dir."""
+    for item in sorted(current.iterdir()):
+        if item.is_symlink():
+            dest_rel = item.relative_to(pkg_dir)
+            target = item.resolve()
+            if target.is_dir():
+                for f in sorted(target.rglob("*")):
+                    if f.is_file() and f.name != ".gitkeep":
+                        result.append((f, dest_rel / f.relative_to(target)))
+            elif target.is_file():
+                result.append((target, dest_rel))
+        elif item.is_dir():
+            _collect_symlinks(pkg_dir, item, result)
+
+
+def resolve_package_files(repo: Path, name: str) -> list[tuple[Path, Path]]:
+    """Return all (source_abs_path, dest_rel_path) pairs for a package's symlinks."""
+    pkg_dir = repo / PACKAGES_DIR / name
+    if not pkg_dir.is_dir():
+        raise click.ClickException(f"Package '{name}' not found.")
+    result: list[tuple[Path, Path]] = []
+    _collect_symlinks(pkg_dir, pkg_dir, result)
+    return sorted(result, key=lambda t: t[1])
+
+
+def do_build_package(repo: Path, name: str, profile: str | None = None) -> None:
+    """Build a package: resolve symlinks, check vetting, apply patches, stage."""
+    pairs = resolve_package_files(repo, name)
+    if not pairs:
+        raise click.ClickException(f"Package '{name}' has no files (no symlinks found).")
+
+    sources = repo / SOURCES_DIR
+
+    # Refuse if any file is not cleanly vetted — check all before staging any.
+    errors = []
+    for source_abs, dest_rel in pairs:
+        try:
+            rel = source_abs.relative_to(sources)
+        except ValueError:
+            errors.append(f"  {source_abs}: not inside sources directory")
+            continue
+        status = vet_status_for_file(repo, rel)
+        if status in ("unvetted", "modified"):
+            errors.append(f"  {rel}: {status}")
+    if errors:
+        raise click.ClickException(
+            "Cannot build package — the following files are not vetted:\n"
+            + "\n".join(errors)
+        )
+
+    # Stage each file.
+    for source_abs, dest_rel in pairs:
+        rel = source_abs.relative_to(sources)
+        content = source_abs.read_bytes()
+        patches = list_patches_for(repo, rel, profile=profile)
+        if patches:
+            content = apply_patches(content, patches)
+        staged_path = repo / STAGED_DIR / name / dest_rel
+        staged_path.parent.mkdir(parents=True, exist_ok=True)
+        staged_path.write_bytes(content)
+        if os.access(source_abs, os.X_OK):
+            staged_path.chmod(staged_path.stat().st_mode | 0o111)
+
+    click.echo(f"Built package '{name}': {len(pairs)} file(s) staged to 40_staged/{name}/.")
+
+
 def vet_single_file(repo: Path, rel: Path) -> bool:
     """Interactively vet a single source file.
 
@@ -722,69 +789,141 @@ def stage_list(profile):
         click.echo("No staged files.")
 
 
-# ── install ────────────────────────────────────────────────────────────
+# ── package ────────────────────────────────────────────────────────────
 
 @cli.group()
+def package():
+    """Manage packages: named, installable subsets of vetted sources."""
+
+
+@package.command("new")
+@click.argument("name")
+def package_new(name):
+    """Create a new empty package."""
+    r = find_repo()
+    pkg_dir = r / PACKAGES_DIR / name
+    if pkg_dir.exists():
+        raise click.ClickException(f"Package '{name}' already exists.")
+    pkg_dir.mkdir(parents=True)
+    click.echo(f"Created package '{name}' at {pkg_dir.relative_to(r)}.")
+
+
+@package.command("list")
+def package_list():
+    """List all defined packages."""
+    r = find_repo()
+    pkgs_dir = r / PACKAGES_DIR
+    if not pkgs_dir.is_dir():
+        click.echo("No packages defined.")
+        return
+    packages = [
+        p for p in sorted(pkgs_dir.iterdir())
+        if p.is_dir() and not p.is_symlink() and p.name != ".gitkeep"
+    ]
+    if not packages:
+        click.echo("No packages defined.")
+        return
+    for pkg in packages:
+        click.echo(f"  {pkg.name}")
+
+
+@package.command("add")
+@click.argument("name")
+@click.argument("source_path", type=click.Path())
+@click.argument("dest_path", type=click.Path())
+def package_add(name, source_path, dest_path):
+    """Add a file or directory to a package as a symlink.
+
+    SOURCE_PATH is relative to 10_sources/.
+    DEST_PATH is where it appears within the package (and installation target).
+    """
+    r = find_repo()
+    pkg_dir = r / PACKAGES_DIR / name
+    if not pkg_dir.is_dir():
+        raise click.ClickException(
+            f"Package '{name}' not found. Run 'skfl package new {name}' first."
+        )
+
+    sources = r / SOURCES_DIR
+    try:
+        rel = resolve_to_source_rel(r, source_path)
+    except ValueError:
+        raise click.ClickException(
+            f"Source path '{source_path}' is not inside the sources directory."
+        )
+
+    source_abs = sources / rel
+    if not source_abs.exists():
+        raise click.ClickException(f"Source not found: {source_abs}")
+
+    symlink_path = pkg_dir / dest_path
+    if symlink_path.exists() or symlink_path.is_symlink():
+        raise click.ClickException(
+            f"Destination '{dest_path}' already exists in package '{name}'."
+        )
+
+    symlink_path.parent.mkdir(parents=True, exist_ok=True)
+    rel_target = os.path.relpath(source_abs.resolve(), symlink_path.parent.resolve())
+    symlink_path.symlink_to(rel_target)
+    click.echo(f"  added: {dest_path} -> {rel_target}")
+
+
+@package.command("build")
+@click.argument("name")
+@click.option("--as", "profile", default=None, help="Apply profile-specific patches.")
+def package_build(name, profile):
+    """Build a package: vet-check, apply patches, stage to 40_staged/<name>/."""
+    r = find_repo()
+    do_build_package(r, name, profile=profile)
+
+
+@package.group()
 def install():
-    """Install staged files to a target directory."""
+    """Install a built package to a target directory."""
 
 
 @install.command("rsync")
+@click.argument("name")
 @click.argument("target", type=click.Path())
-def install_rsync(target):
-    """Install staged files using rsync."""
+def package_install_rsync(name, target):
+    """Install a package using rsync."""
     r = find_repo()
-    staged = r / STAGED_DIR
-
+    staged = r / STAGED_DIR / name
+    if not staged.is_dir():
+        raise click.ClickException(
+            f"Package '{name}' has not been built. Run 'skfl package build {name}' first."
+        )
     if not shutil.which("rsync"):
         raise click.ClickException("rsync is not installed. Install it and try again.")
-
-    target = Path(target).resolve()
-    target.mkdir(parents=True, exist_ok=True)
-
-    src_path = str(staged) + "/"
+    target_path = Path(target).resolve()
+    target_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["rsync", "-av", "--exclude=.gitkeep", src_path, str(target)],
+        ["rsync", "-av", "--exclude=.gitkeep", str(staged) + "/", str(target_path)],
         check=True,
     )
-    click.echo(f"Installed staged files to {target}.")
+    click.echo(f"Installed package '{name}' to {target_path}.")
 
 
 @install.command("stow")
+@click.argument("name")
 @click.argument("target", type=click.Path())
-def install_stow(target):
-    """Install staged files using GNU Stow."""
+def package_install_stow(name, target):
+    """Install a package using GNU Stow."""
     r = find_repo()
-
+    staged = r / STAGED_DIR / name
+    if not staged.is_dir():
+        raise click.ClickException(
+            f"Package '{name}' has not been built. Run 'skfl package build {name}' first."
+        )
     if not shutil.which("stow"):
         raise click.ClickException("GNU Stow is not installed. Install it and try again.")
-
-    target = Path(target).resolve()
-    target.mkdir(parents=True, exist_ok=True)
-
+    target_path = Path(target).resolve()
+    target_path.mkdir(parents=True, exist_ok=True)
     subprocess.run(
-        ["stow", "--dir", str(r / STAGED_DIR), "--target", str(target), "."],
+        ["stow", "--dir", str(r / STAGED_DIR), "--target", str(target_path), name],
         check=True,
     )
-    click.echo(f"Installed staged files to {target} via stow.")
-
-
-# ── top-level shortcuts ───────────────────────────────────────────────
-
-@cli.command("rsync")
-@click.argument("target", type=click.Path())
-@click.pass_context
-def rsync_shortcut(ctx, target):
-    """Shortcut for 'skfl install rsync'."""
-    ctx.invoke(install_rsync, target=target)
-
-
-@cli.command("stow")
-@click.argument("target", type=click.Path())
-@click.pass_context
-def stow_shortcut(ctx, target):
-    """Shortcut for 'skfl install stow'."""
-    ctx.invoke(install_stow, target=target)
+    click.echo(f"Installed package '{name}' to {target_path} via stow.")
 
 
 if __name__ == "__main__":
