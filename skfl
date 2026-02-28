@@ -203,19 +203,21 @@ def vet_single_file(repo: Path, rel: Path) -> bool:
         click.echo(f"  {rel}: already vetted (unchanged)")
         return True
 
-    pager = "less"
+    pager_cmd = ["less"]
     if str(rel).endswith(".md") and shutil.which("glow"):
-        pager = "glow"
+        pager_cmd = ["glow", "-p"]
 
     if status == "modified":
         click.echo(f"  {rel}: source has changed since last vet. Opening in pager for review...")
-        subprocess.run([pager, str(source_path)])
+        if sys.stdin.isatty():
+            subprocess.run([*pager_cmd, str(source_path)])
         if not click.confirm(f"  Approve changes to {rel}?"):
             click.echo(f"  Skipping {rel}.")
             return False
     else:
         click.echo(f"  {rel}: unvetted. Opening in pager...")
-        subprocess.run([pager, str(source_path)])
+        if sys.stdin.isatty():
+            subprocess.run([*pager_cmd, str(source_path)])
         if not click.confirm(f"  Mark {rel} as vetted?"):
             click.echo(f"  Skipping {rel}.")
             return False
