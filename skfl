@@ -1,0 +1,722 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.11"
+# dependencies = [
+#     "click>=8.0",
+#     "tomli-w>=1.0",
+# ]
+# ///
+"""skfl - manage skills for agentic LLM products, skillfully."""
+
+import hashlib
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import tomllib
+from pathlib import Path
+
+import click
+import tomli_w
+
+SOURCES_DIR = "10_sources"
+VETTED_DIR = "20_vetted"
+PATCHES_DIR = "30_patches"
+STAGED_DIR = "40_staged"
+
+SKFL_TOML = "skfl.toml"
+
+REPO_DIRS = [SOURCES_DIR, VETTED_DIR, PATCHES_DIR, STAGED_DIR]
+
+
+# ── helpers ────────────────────────────────────────────────────────────
+
+def find_repo(start: Path | None = None) -> Path:
+    """Walk up from start (default: cwd) to find a directory containing skfl.toml."""
+    p = (start or Path.cwd()).resolve()
+    while True:
+        if (p / SKFL_TOML).is_file():
+            return p
+        parent = p.parent
+        if parent == p:
+            break
+        p = parent
+    raise click.ClickException(
+        "Not inside an skfl repository (no skfl.toml found). Run 'skfl init' to create one."
+    )
+
+
+def load_config(repo: Path) -> dict:
+    with open(repo / SKFL_TOML, "rb") as f:
+        return tomllib.load(f)
+
+
+def save_config(repo: Path, config: dict) -> None:
+    with open(repo / SKFL_TOML, "wb") as f:
+        tomli_w.dump(config, f)
+
+
+def resolve_to_source_rel(repo: Path, fpath: str | Path) -> Path:
+    """Resolve a user-provided file path to a source-relative path."""
+    sources = repo / SOURCES_DIR
+    fpath = Path(fpath)
+    if fpath.is_absolute():
+        return fpath.relative_to(sources.resolve())
+    candidate = sources / fpath
+    if candidate.exists():
+        return fpath
+    return fpath.resolve().relative_to(sources.resolve())
+
+
+def file_hash(path: Path) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def patches_dir_for(repo: Path, rel: Path) -> Path:
+    """Return the patches .d directory for a given source-relative path."""
+    return Path(str(repo / PATCHES_DIR / rel) + ".d")
+
+
+def list_patches_for(repo: Path, rel: Path) -> list[Path]:
+    d = patches_dir_for(repo, rel)
+    if not d.is_dir():
+        return []
+    return sorted(p for p in d.iterdir() if p.suffix == ".patch")
+
+
+def apply_patches(source_content: bytes, patches: list[Path]) -> bytes:
+    """Apply a sequence of patch files to source content, returning the patched result."""
+    result = source_content
+    for patch_path in patches:
+        with tempfile.NamedTemporaryFile(suffix=".orig", delete=False) as tmp:
+            tmp.write(result)
+            tmp_name = tmp.name
+        try:
+            proc = subprocess.run(
+                ["patch", "--quiet", "--no-backup-if-mismatch", "-o", "-", tmp_name],
+                input=patch_path.read_bytes(),
+                capture_output=True,
+            )
+            if proc.returncode != 0:
+                raise click.ClickException(
+                    f"Patch {patch_path.name} failed to apply:\n{proc.stderr.decode()}"
+                )
+            result = proc.stdout
+        finally:
+            os.unlink(tmp_name)
+    return result
+
+
+def vet_status_for_file(repo: Path, rel: Path) -> str:
+    """Return vetting status: 'vetted', 'modified', or 'unvetted'."""
+    source_path = repo / SOURCES_DIR / rel
+    vetted_path = repo / VETTED_DIR / rel
+    if not source_path.is_file():
+        return "missing"
+    if not vetted_path.is_file():
+        return "unvetted"
+    if file_hash(source_path) == file_hash(vetted_path):
+        return "vetted"
+    return "modified"
+
+
+def all_source_files(repo: Path) -> list[Path]:
+    """Return all files in the sources directory as relative paths."""
+    sources = repo / SOURCES_DIR
+    if not sources.is_dir():
+        return []
+    result = []
+    for p in sorted(sources.rglob("*")):
+        if p.is_file() and p.name != ".gitkeep":
+            result.append(p.relative_to(sources))
+    return result
+
+
+def do_vet_files(repo: Path, files: list[str]) -> None:
+    """Vet the given source files."""
+    sources = repo / SOURCES_DIR
+    for fpath in files:
+        try:
+            rel = resolve_to_source_rel(repo, fpath)
+        except ValueError:
+            raise click.ClickException(
+                f"File {fpath} is not inside the sources directory ({sources})."
+            )
+
+        source_path = sources / rel
+        if not source_path.is_file():
+            raise click.ClickException(f"Source file not found: {source_path}")
+
+        vetted_path = repo / VETTED_DIR / rel
+        status = vet_status_for_file(repo, rel)
+
+        if status == "vetted":
+            click.echo(f"  {rel}: already vetted (unchanged)")
+            continue
+
+        if status == "modified":
+            click.echo(f"  {rel}: source has changed since last vet. Showing diff:")
+            subprocess.run(["diff", "-u", str(vetted_path), str(source_path)])
+            if not click.confirm(f"  Approve changes to {rel}?"):
+                click.echo(f"  Skipping {rel}.")
+                continue
+        else:
+            pager = "less"
+            if str(rel).endswith(".md") and shutil.which("glow"):
+                pager = "glow"
+            click.echo(f"  {rel}: unvetted. Opening in pager...")
+            subprocess.run([pager, str(source_path)])
+            if not click.confirm(f"  Mark {rel} as vetted?"):
+                click.echo(f"  Skipping {rel}.")
+                continue
+
+        vetted_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source_path, vetted_path)
+        click.echo(f"  {rel}: vetted.")
+
+
+def do_stage_files(repo: Path, files: list[str]) -> None:
+    """Stage the given source files."""
+    sources = repo / SOURCES_DIR
+    for fpath in files:
+        try:
+            rel = resolve_to_source_rel(repo, fpath)
+        except ValueError:
+            raise click.ClickException(
+                f"File {fpath} is not inside the sources directory."
+            )
+
+        source_path = sources / rel
+        if not source_path.is_file():
+            raise click.ClickException(f"Source file not found: {source_path}")
+
+        status = vet_status_for_file(repo, rel)
+        if status == "unvetted":
+            raise click.ClickException(
+                f"File {rel} has not been vetted. Run 'skfl vet {rel}' first."
+            )
+        if status == "modified":
+            raise click.ClickException(
+                f"File {rel} has been modified since last vet. "
+                f"Run 'skfl vet {rel}' to review changes."
+            )
+
+        vetted_path = repo / VETTED_DIR / rel
+        content = vetted_path.read_bytes()
+
+        patches = list_patches_for(repo, rel)
+        if patches:
+            content = apply_patches(content, patches)
+
+        staged_path = repo / STAGED_DIR / rel
+        staged_path.parent.mkdir(parents=True, exist_ok=True)
+        staged_path.write_bytes(content)
+        if os.access(source_path, os.X_OK):
+            staged_path.chmod(staged_path.stat().st_mode | 0o111)
+
+        n_patches = len(patches)
+        patch_note = (
+            f" ({n_patches} patch{'es' if n_patches != 1 else ''} applied)"
+            if patches
+            else ""
+        )
+        click.echo(f"  staged: {rel}{patch_note}")
+
+
+# ── custom group for vet/stage that routes unknown args to a default command ──
+
+class DefaultCommandGroup(click.Group):
+    """A click Group that routes unknown subcommands to a default handler."""
+
+    def __init__(self, *args, default_handler=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.default_handler = default_handler
+
+    def parse_args(self, ctx, args):
+        # If the first arg is not a known subcommand, prepend the default command name
+        if args and args[0] not in self.commands:
+            args = ["_default"] + list(args)
+        return super().parse_args(ctx, args)
+
+    def resolve_command(self, ctx, args):
+        cmd_name = args[0] if args else None
+        if cmd_name not in self.commands:
+            args = ["_default"] + list(args)
+        return super().resolve_command(ctx, args)
+
+
+# ── CLI ────────────────────────────────────────────────────────────────
+
+@click.group()
+def cli():
+    """skfl - manage skills for agentic LLM products, skillfully."""
+
+
+# ── init ───────────────────────────────────────────────────────────────
+
+@cli.command()
+@click.argument("path", default=".", type=click.Path())
+def init(path):
+    """Initialize a new skfl repository."""
+    repo = Path(path).resolve()
+    if (repo / SKFL_TOML).exists():
+        raise click.ClickException(f"Repository already exists at {repo}")
+
+    repo.mkdir(parents=True, exist_ok=True)
+    for d in REPO_DIRS:
+        (repo / d).mkdir(parents=True, exist_ok=True)
+        (repo / d / ".gitkeep").touch()
+
+    config = {
+        "repository": {"version": 1},
+        "sources": {},
+    }
+    save_config(repo, config)
+
+    gitignore = repo / ".gitignore"
+    if not gitignore.exists():
+        gitignore.write_text("# skfl managed\n")
+
+    click.echo(f"Initialized skfl repository at {repo}")
+
+
+# ── doctor ─────────────────────────────────────────────────────────────
+
+@cli.command()
+def doctor():
+    """Check the status of skfl's runtime dependencies."""
+    tools = {
+        "python3": ("Python interpreter", True),
+        "git": ("Version control", True),
+        "rsync": ("File synchronization (for 'skfl install rsync')", False),
+        "stow": ("Symlink farm manager (for 'skfl install stow')", False),
+        "glow": ("Markdown pager (for vetting)", False),
+        "fzf": ("Interactive selection", False),
+        "diff": ("Diff utility (for vetting and patching)", True),
+        "patch": ("Patch utility (for patching)", True),
+    }
+    all_ok = True
+    for tool, (desc, required) in tools.items():
+        path = shutil.which(tool)
+        if path:
+            click.echo(f"  ok   {tool:10s} {desc} ({path})")
+        elif required:
+            click.echo(f"  MISS {tool:10s} {desc} [REQUIRED]")
+            all_ok = False
+        else:
+            click.echo(f"  miss {tool:10s} {desc} [optional]")
+
+    if all_ok:
+        click.echo("\nAll required dependencies are available.")
+    else:
+        click.echo("\nSome required dependencies are missing.")
+        sys.exit(1)
+
+
+# ── source ─────────────────────────────────────────────────────────────
+
+@cli.group()
+def source():
+    """Manage skill sources."""
+
+
+@source.command("pull")
+@click.argument("url", required=False)
+@click.option("--owner", help="GitHub owner")
+@click.option("--repo", help="GitHub repo")
+@click.option("--ref", help="Git ref (branch, tag, commit)")
+def source_pull(url, owner, repo, ref):
+    """Pull or update a source from GitHub."""
+    r = find_repo()
+
+    if url:
+        url = url.rstrip("/")
+        if url.endswith(".git"):
+            url = url[:-4]
+        parts = url.split("/")
+        try:
+            gh_idx = parts.index("github.com")
+            owner = parts[gh_idx + 1]
+            repo = parts[gh_idx + 2]
+        except (ValueError, IndexError):
+            raise click.ClickException(f"Could not parse GitHub URL: {url}")
+
+    if not owner or not repo:
+        raise click.ClickException(
+            "Specify a GitHub URL or --owner and --repo."
+        )
+
+    source_name = f"{owner}__{repo}"
+    dest = r / SOURCES_DIR / "github" / source_name
+
+    if dest.exists():
+        click.echo(f"Updating source {source_name}...")
+        cmd = ["git", "-C", str(dest), "fetch", "--depth=1", "origin"]
+        if ref:
+            cmd.append(ref)
+        subprocess.run(cmd, check=True)
+        checkout_ref = ref or "FETCH_HEAD"
+        subprocess.run(
+            ["git", "-C", str(dest), "checkout", checkout_ref, "--", "."],
+            check=True,
+        )
+        click.echo(f"Updated {source_name}.")
+    else:
+        click.echo(f"Pulling source {source_name}...")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        cmd = ["git", "clone", "--depth=1"]
+        if ref:
+            cmd += ["--branch", ref]
+        cmd += [f"https://github.com/{owner}/{repo}.git", str(dest)]
+        subprocess.run(cmd, check=True)
+        click.echo(f"Pulled {source_name} to {dest}.")
+
+    config = load_config(r)
+    config.setdefault("sources", {})
+    config["sources"][source_name] = {
+        "type": "github",
+        "owner": owner,
+        "repo": repo,
+        "ref": ref or "",
+        "path": f"github/{source_name}",
+    }
+    save_config(r, config)
+
+
+@source.command("custom")
+@click.argument("name")
+@click.argument("path", type=click.Path(exists=True))
+def source_custom(name, path):
+    """Register a directory of self-authored files as a source."""
+    r = find_repo()
+    dest = r / SOURCES_DIR / "custom" / name
+
+    if dest.exists():
+        raise click.ClickException(f"Custom source '{name}' already exists at {dest}")
+
+    src = Path(path).resolve()
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, dest, dirs_exist_ok=True)
+
+    config = load_config(r)
+    config.setdefault("sources", {})
+    config["sources"][name] = {
+        "type": "custom",
+        "name": name,
+        "path": f"custom/{name}",
+    }
+    save_config(r, config)
+    click.echo(f"Registered custom source '{name}' from {src}.")
+
+
+@source.command("list")
+def source_list():
+    """List all registered sources."""
+    r = find_repo()
+    config = load_config(r)
+    sources = config.get("sources", {})
+    if not sources:
+        click.echo("No sources registered.")
+        return
+    for name, info in sources.items():
+        stype = info.get("type", "unknown")
+        spath = info.get("path", "")
+        click.echo(f"  {name:30s} type={stype:10s} path={spath}")
+
+
+# ── vet ────────────────────────────────────────────────────────────────
+
+@cli.group(cls=DefaultCommandGroup, invoke_without_command=True)
+@click.pass_context
+def vet(ctx):
+    """Vet source files. Usage: skfl vet <files> | skfl vet status"""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@vet.command("_default", hidden=True)
+@click.argument("files", nargs=-1, required=True, type=click.Path())
+def vet_default(files):
+    """Vet the specified source files."""
+    r = find_repo()
+    do_vet_files(r, list(files))
+
+
+@vet.command("status")
+@click.argument("files", nargs=-1, type=click.Path())
+def vet_status(files):
+    """Show vetting status of source files."""
+    r = find_repo()
+    if files:
+        rels = []
+        for fpath in files:
+            try:
+                rels.append(resolve_to_source_rel(r, fpath))
+            except ValueError:
+                raise click.ClickException(f"File {fpath} is not inside sources.")
+    else:
+        rels = all_source_files(r)
+
+    if not rels:
+        click.echo("No source files found.")
+        return
+
+    for rel in rels:
+        status = vet_status_for_file(r, rel)
+        click.echo(f"  {status:10s} {rel}")
+
+
+# ── patch ──────────────────────────────────────────────────────────────
+
+@cli.group()
+def patch():
+    """Manage patches on top of source files."""
+
+
+@patch.command("create")
+@click.argument("source_file", type=click.Path())
+@click.option("--name", "-n", default=None, help="Short description for the patch filename.")
+def patch_create(source_file, name):
+    """Create a new patch for a vetted source file."""
+    r = find_repo()
+    sources = r / SOURCES_DIR
+
+    try:
+        rel = resolve_to_source_rel(r, source_file)
+    except ValueError:
+        raise click.ClickException(
+            f"File {source_file} is not inside the sources directory."
+        )
+
+    src = sources / rel
+    if not src.is_file():
+        raise click.ClickException(f"Source file not found: {src}")
+
+    status = vet_status_for_file(r, rel)
+    if status == "unvetted":
+        raise click.ClickException(
+            f"File {rel} has not been vetted. Run 'skfl vet {rel}' first."
+        )
+
+    pdir = patches_dir_for(r, rel)
+    existing = list_patches_for(r, rel)
+    next_num = len(existing) + 1
+
+    if not name:
+        name = "patch"
+    safe_name = name.replace(" ", "-").replace("/", "-")
+    patch_name = f"{next_num:03d}-{safe_name}.patch"
+
+    vetted_path = r / VETTED_DIR / rel
+    base_content = vetted_path.read_bytes()
+    if existing:
+        base_content = apply_patches(base_content, existing)
+
+    suffix = src.suffix or ".txt"
+    with tempfile.NamedTemporaryFile(
+        mode="wb", suffix=suffix, delete=False, prefix="skfl-edit-"
+    ) as tmp:
+        tmp.write(base_content)
+        tmp_path = tmp.name
+
+    editor = os.environ.get("EDITOR", "vi")
+    click.echo(f"Opening {rel} in {editor} for editing...")
+    subprocess.run([editor, tmp_path])
+
+    edited_content = Path(tmp_path).read_bytes()
+    os.unlink(tmp_path)
+
+    if edited_content == base_content:
+        click.echo("No changes made. Patch not created.")
+        return
+
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".orig", delete=False) as orig_tmp:
+        orig_tmp.write(base_content)
+        orig_path = orig_tmp.name
+    with tempfile.NamedTemporaryFile(mode="wb", suffix=".new", delete=False) as new_tmp:
+        new_tmp.write(edited_content)
+        new_path = new_tmp.name
+
+    proc = subprocess.run(
+        ["diff", "-u", orig_path, new_path],
+        capture_output=True,
+    )
+    os.unlink(orig_path)
+    os.unlink(new_path)
+
+    patch_content = proc.stdout
+    pdir.mkdir(parents=True, exist_ok=True)
+    patch_path = pdir / patch_name
+    patch_path.write_bytes(patch_content)
+
+    click.echo(f"Created patch: {patch_path.relative_to(r)}")
+
+
+@patch.command("list")
+@click.argument("source_file", required=False, type=click.Path())
+def patch_list(source_file):
+    """List patches, optionally for a specific source file."""
+    r = find_repo()
+
+    if source_file:
+        try:
+            rel = resolve_to_source_rel(r, source_file)
+        except ValueError:
+            rel = Path(source_file)
+
+        patches = list_patches_for(r, rel)
+        if not patches:
+            click.echo(f"No patches for {rel}.")
+            return
+        click.echo(f"Patches for {rel}:")
+        for p in patches:
+            click.echo(f"  {p.name}")
+    else:
+        patches_root = r / PATCHES_DIR
+        if not patches_root.is_dir():
+            click.echo("No patches.")
+            return
+        found = False
+        for p in sorted(patches_root.rglob("*.patch")):
+            found = True
+            click.echo(f"  {p.relative_to(r)}")
+        if not found:
+            click.echo("No patches.")
+
+
+@patch.command("remove")
+@click.argument("patch_file", type=click.Path())
+def patch_remove(patch_file):
+    """Remove a patch."""
+    r = find_repo()
+    patch_path = Path(patch_file)
+
+    if not patch_path.is_absolute():
+        candidate = r / patch_path
+        if candidate.is_file():
+            patch_path = candidate
+        else:
+            candidate = r / PATCHES_DIR / patch_path
+            if candidate.is_file():
+                patch_path = candidate
+            else:
+                raise click.ClickException(f"Patch file not found: {patch_file}")
+
+    if not patch_path.is_file():
+        raise click.ClickException(f"Patch file not found: {patch_path}")
+
+    patch_path.unlink()
+    click.echo(f"Removed patch: {patch_file}")
+
+    parent = patch_path.parent
+    if parent.is_dir() and not any(parent.iterdir()):
+        parent.rmdir()
+
+
+# ── stage ──────────────────────────────────────────────────────────────
+
+@cli.group(cls=DefaultCommandGroup, invoke_without_command=True)
+@click.pass_context
+def stage(ctx):
+    """Stage vetted files. Usage: skfl stage <files> | skfl stage list"""
+    if ctx.invoked_subcommand is None:
+        click.echo(ctx.get_help())
+
+
+@stage.command("_default", hidden=True)
+@click.argument("files", nargs=-1, required=True, type=click.Path())
+def stage_default(files):
+    """Stage the specified source files."""
+    r = find_repo()
+    do_stage_files(r, list(files))
+
+
+@stage.command("list")
+def stage_list():
+    """Show currently staged files."""
+    r = find_repo()
+    staged = r / STAGED_DIR
+    if not staged.is_dir():
+        click.echo("No staged files.")
+        return
+    found = False
+    for p in sorted(staged.rglob("*")):
+        if p.is_file() and p.name != ".gitkeep":
+            found = True
+            click.echo(f"  {p.relative_to(staged)}")
+    if not found:
+        click.echo("No staged files.")
+
+
+# ── install ────────────────────────────────────────────────────────────
+
+@cli.group()
+def install():
+    """Install staged files to a target directory."""
+
+
+@install.command("rsync")
+@click.argument("target", type=click.Path())
+def install_rsync(target):
+    """Install staged files using rsync."""
+    r = find_repo()
+    staged = r / STAGED_DIR
+
+    if not shutil.which("rsync"):
+        raise click.ClickException("rsync is not installed. Install it and try again.")
+
+    target = Path(target).resolve()
+    target.mkdir(parents=True, exist_ok=True)
+
+    src_path = str(staged) + "/"
+    subprocess.run(
+        ["rsync", "-av", "--exclude=.gitkeep", src_path, str(target)],
+        check=True,
+    )
+    click.echo(f"Installed staged files to {target}.")
+
+
+@install.command("stow")
+@click.argument("target", type=click.Path())
+def install_stow(target):
+    """Install staged files using GNU Stow."""
+    r = find_repo()
+
+    if not shutil.which("stow"):
+        raise click.ClickException("GNU Stow is not installed. Install it and try again.")
+
+    target = Path(target).resolve()
+    target.mkdir(parents=True, exist_ok=True)
+
+    subprocess.run(
+        ["stow", "--dir", str(r / STAGED_DIR), "--target", str(target), "."],
+        check=True,
+    )
+    click.echo(f"Installed staged files to {target} via stow.")
+
+
+# ── top-level shortcuts ───────────────────────────────────────────────
+
+@cli.command("rsync")
+@click.argument("target", type=click.Path())
+@click.pass_context
+def rsync_shortcut(ctx, target):
+    """Shortcut for 'skfl install rsync'."""
+    ctx.invoke(install_rsync, target=target)
+
+
+@cli.command("stow")
+@click.argument("target", type=click.Path())
+@click.pass_context
+def stow_shortcut(ctx, target):
+    """Shortcut for 'skfl install stow'."""
+    ctx.invoke(install_stow, target=target)
+
+
+if __name__ == "__main__":
+    cli()
