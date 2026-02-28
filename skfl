@@ -189,6 +189,14 @@ def _stage_single_file(
     return len(patches)
 
 
+def all_patch_files(repo: Path) -> list[Path]:
+    """Return all patch files under 30_patches/ sorted by path."""
+    patches_root = repo / PATCHES_DIR
+    if not patches_root.is_dir():
+        return []
+    return sorted(patches_root.rglob("*.patch"))
+
+
 def expand_paths(repo: Path, fpaths: list[str]) -> list[str]:
     """Expand any directory arguments into their constituent source files."""
     sources = repo / SOURCES_DIR
@@ -325,47 +333,42 @@ def do_vet_files(repo: Path, files: list[str]) -> None:
         vet_single_file(repo, rel)
 
 
+def _find_repo_for_completion() -> Path | None:
+    """Return the repo root for a completion callback, or None if not in a repo."""
+    try:
+        return find_repo()
+    except click.ClickException:
+        return None
+
+
 def _complete_source_files(ctx, param, incomplete):
     """Shell-completion callback: source files from 10_sources/ (repo-relative paths)."""
     from click.shell_completion import CompletionItem
-    try:
-        repo = find_repo()
-    except click.ClickException:
-        return []
-    sources = repo / SOURCES_DIR
-    if not sources.is_dir():
+    if (repo := _find_repo_for_completion()) is None:
         return []
     return [
-        CompletionItem(str(p.relative_to(sources)))
-        for p in sorted(sources.rglob("*"))
-        if p.is_file() and p.name != ".gitkeep"
-        and str(p.relative_to(sources)).startswith(incomplete)
+        CompletionItem(s)
+        for s in (str(rel) for rel in all_source_files(repo))
+        if s.startswith(incomplete)
     ]
 
 
 def _complete_patch_files(ctx, param, incomplete):
     """Shell-completion callback: patch files from 30_patches/ (repo-relative paths)."""
     from click.shell_completion import CompletionItem
-    try:
-        repo = find_repo()
-    except click.ClickException:
-        return []
-    patches_root = repo / PATCHES_DIR
-    if not patches_root.is_dir():
+    if (repo := _find_repo_for_completion()) is None:
         return []
     return [
-        CompletionItem(str(p.relative_to(repo)))
-        for p in sorted(patches_root.rglob("*.patch"))
-        if str(p.relative_to(repo)).startswith(incomplete)
+        CompletionItem(s)
+        for s in (str(p.relative_to(repo)) for p in all_patch_files(repo))
+        if s.startswith(incomplete)
     ]
 
 
 def _complete_profiles(ctx, param, incomplete):
     """Shell-completion callback: profile names from 30_patches/_profiles/ subdirectories."""
     from click.shell_completion import CompletionItem
-    try:
-        repo = find_repo()
-    except click.ClickException:
+    if (repo := _find_repo_for_completion()) is None:
         return []
     profiles_dir = repo / PATCHES_DIR / "_profiles"
     if not profiles_dir.is_dir():
@@ -757,16 +760,12 @@ def patch_list(source_file):
         for p in patches:
             click.echo(f"  {p.name}")
     else:
-        patches_root = r / PATCHES_DIR
-        if not patches_root.is_dir():
+        patches = all_patch_files(r)
+        if not patches:
             click.echo("No patches.")
             return
-        found = False
-        for p in sorted(patches_root.rglob("*.patch")):
-            found = True
+        for p in patches:
             click.echo(f"  {p.relative_to(r)}")
-        if not found:
-            click.echo("No patches.")
 
 
 @patch.command("remove")
@@ -982,19 +981,17 @@ def completion(shell):
 
     SHELL may be bash, zsh, or fish. Omit to print instructions for all shells.
     """
-    if shell in (None, "bash"):
-        click.echo("# bash — add to ~/.bashrc:")
-        click.echo('eval "$(_SKFL_COMPLETE=bash_source skfl)"')
-        if shell is None:
+    shells = [
+        ("bash", "~/.bashrc",                           'eval "$(_SKFL_COMPLETE=bash_source skfl)"'),
+        ("zsh",  "~/.zshrc",                            'eval "$(_SKFL_COMPLETE=zsh_source skfl)"'),
+        ("fish", "~/.config/fish/completions/skfl.fish", "_SKFL_COMPLETE=fish_source skfl | source"),
+    ]
+    entries = [(name, rc, line) for name, rc, line in shells if shell in (None, name)]
+    for i, (name, rc, line) in enumerate(entries):
+        click.echo(f"# {name} — add to {rc}:")
+        click.echo(line)
+        if shell is None and i < len(entries) - 1:
             click.echo()
-    if shell in (None, "zsh"):
-        click.echo("# zsh — add to ~/.zshrc:")
-        click.echo('eval "$(_SKFL_COMPLETE=zsh_source skfl)"')
-        if shell is None:
-            click.echo()
-    if shell in (None, "fish"):
-        click.echo("# fish — add to ~/.config/fish/completions/skfl.fish:")
-        click.echo("_SKFL_COMPLETE=fish_source skfl | source")
 
 
 # ── top-level shortcuts ───────────────────────────────────────────────
