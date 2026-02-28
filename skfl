@@ -166,8 +166,29 @@ def all_source_files(repo: Path) -> list[Path]:
     return result
 
 
+def expand_paths(repo: Path, fpaths: list[str]) -> list[str]:
+    """Expand any directory arguments into their constituent source files."""
+    sources = repo / SOURCES_DIR
+    result = []
+    for fpath in fpaths:
+        try:
+            rel = resolve_to_source_rel(repo, fpath)
+        except ValueError:
+            result.append(fpath)  # let downstream handle the error
+            continue
+        source_path = sources / rel
+        if source_path.is_dir():
+            for p in sorted(source_path.rglob("*")):
+                if p.is_file() and p.name != ".gitkeep":
+                    result.append(str(p.relative_to(sources)))
+        else:
+            result.append(fpath)
+    return result
+
+
 def do_vet_files(repo: Path, files: list[str]) -> None:
     """Vet the given source files."""
+    files = expand_paths(repo, files)
     sources = repo / SOURCES_DIR
     for fpath in files:
         try:
@@ -210,6 +231,7 @@ def do_vet_files(repo: Path, files: list[str]) -> None:
 
 def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> None:
     """Stage the given source files, optionally under a named profile."""
+    files = expand_paths(repo, files)
     sources = repo / SOURCES_DIR
     for fpath in files:
         try:
