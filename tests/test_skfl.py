@@ -1492,3 +1492,273 @@ class TestRemovedCommands:
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["stow", "/tmp/x"])
         assert result.exit_code != 0
+
+
+# ── completion helpers ─────────────────────────────────────────────────
+
+
+class TestCompletionHelpers:
+    """Tests for the three shell-completion callback functions."""
+
+    # ── _complete_source_files ────────────────────────────────────────
+
+    def test_source_files_returns_all_files(self, repo_with_source):
+        results = skfl._complete_source_files(None, None, "")
+        values = {r.value for r in results}
+        assert "custom/test-src/hello.md" in values
+        assert "custom/test-src/script.py" in values
+        assert "custom/test-src/sub/nested.txt" in values
+
+    def test_source_files_excludes_gitkeep(self, repo_with_source):
+        results = skfl._complete_source_files(None, None, "")
+        values = [r.value for r in results]
+        assert not any(".gitkeep" in v for v in values)
+
+    def test_source_files_filters_by_prefix(self, repo_with_source):
+        results = skfl._complete_source_files(None, None, "custom/test-src/h")
+        values = {r.value for r in results}
+        assert "custom/test-src/hello.md" in values
+        assert "custom/test-src/script.py" not in values
+        assert "custom/test-src/sub/nested.txt" not in values
+
+    def test_source_files_prefix_no_match(self, repo_with_source):
+        results = skfl._complete_source_files(None, None, "nonexistent/")
+        assert results == []
+
+    def test_source_files_empty_sources_dir(self, repo):
+        # Repo exists but no sources added yet
+        results = skfl._complete_source_files(None, None, "")
+        assert results == []
+
+    def test_source_files_no_repo(self, tmp_dir):
+        # cwd is not inside any skfl repo — must return [] not raise
+        results = skfl._complete_source_files(None, None, "")
+        assert results == []
+
+    def test_source_files_returns_completion_items(self, repo_with_source):
+        from click.shell_completion import CompletionItem
+        results = skfl._complete_source_files(None, None, "")
+        assert all(isinstance(r, CompletionItem) for r in results)
+
+    def test_source_files_subdirectory_prefix(self, repo_with_source):
+        results = skfl._complete_source_files(None, None, "custom/test-src/sub/")
+        values = {r.value for r in results}
+        assert "custom/test-src/sub/nested.txt" in values
+
+    def test_source_files_full_match(self, repo_with_source):
+        results = skfl._complete_source_files(None, None, "custom/test-src/script.py")
+        assert len(results) == 1
+        assert results[0].value == "custom/test-src/script.py"
+
+    # ── _complete_patch_files ─────────────────────────────────────────
+
+    def _create_patch(self, repo, rel_path, patch_name="001-test.patch"):
+        """Helper: write a minimal patch file at the expected location."""
+        pdir = skfl.patches_dir_for(repo, rel_path)
+        pdir.mkdir(parents=True, exist_ok=True)
+        patch_path = pdir / patch_name
+        patch_path.write_text("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n")
+        return patch_path
+
+    def test_patch_files_returns_patches(self, repo_with_vetted):
+        repo = repo_with_vetted
+        rel = Path("custom/test-src/hello.md")
+        self._create_patch(repo, rel)
+
+        results = skfl._complete_patch_files(None, None, "")
+        values = [r.value for r in results]
+        assert any("001-test.patch" in v for v in values)
+
+    def test_patch_files_returns_completion_items(self, repo_with_vetted):
+        from click.shell_completion import CompletionItem
+        repo = repo_with_vetted
+        self._create_patch(repo, Path("custom/test-src/script.py"))
+
+        results = skfl._complete_patch_files(None, None, "")
+        assert all(isinstance(r, CompletionItem) for r in results)
+
+    def test_patch_files_paths_are_repo_relative(self, repo_with_vetted):
+        repo = repo_with_vetted
+        self._create_patch(repo, Path("custom/test-src/hello.md"))
+
+        results = skfl._complete_patch_files(None, None, "")
+        assert all(r.value.startswith("30_patches/") for r in results)
+
+    def test_patch_files_filters_by_prefix(self, repo_with_vetted):
+        repo = repo_with_vetted
+        self._create_patch(repo, Path("custom/test-src/hello.md"), "001-alpha.patch")
+        self._create_patch(repo, Path("custom/test-src/script.py"), "001-beta.patch")
+
+        results = skfl._complete_patch_files(None, None, "30_patches/custom/test-src/hello")
+        values = [r.value for r in results]
+        assert any("001-alpha.patch" in v for v in values)
+        assert not any("001-beta.patch" in v for v in values)
+
+    def test_patch_files_no_patches(self, repo):
+        results = skfl._complete_patch_files(None, None, "")
+        assert results == []
+
+    def test_patch_files_no_repo(self, tmp_dir):
+        results = skfl._complete_patch_files(None, None, "")
+        assert results == []
+
+    def test_patch_files_profile_patches_included(self, repo_with_vetted):
+        repo = repo_with_vetted
+        rel = Path("custom/test-src/hello.md")
+        pdir = skfl.profile_patches_dir_for(repo, "work", rel)
+        pdir.mkdir(parents=True, exist_ok=True)
+        (pdir / "001-work.patch").write_text("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n")
+
+        results = skfl._complete_patch_files(None, None, "")
+        values = [r.value for r in results]
+        assert any("001-work.patch" in v for v in values)
+
+    # ── _complete_profiles ────────────────────────────────────────────
+
+    def _make_profile(self, repo, name):
+        d = repo / skfl.PATCHES_DIR / "_profiles" / name
+        d.mkdir(parents=True, exist_ok=True)
+        return d
+
+    def test_profiles_returns_all_profiles(self, repo_with_source):
+        repo = repo_with_source
+        self._make_profile(repo, "work")
+        self._make_profile(repo, "home")
+
+        results = skfl._complete_profiles(None, None, "")
+        values = {r.value for r in results}
+        assert "work" in values
+        assert "home" in values
+
+    def test_profiles_filters_by_prefix(self, repo_with_source):
+        repo = repo_with_source
+        self._make_profile(repo, "work")
+        self._make_profile(repo, "home")
+
+        results = skfl._complete_profiles(None, None, "w")
+        values = {r.value for r in results}
+        assert "work" in values
+        assert "home" not in values
+
+    def test_profiles_prefix_no_match(self, repo_with_source):
+        repo = repo_with_source
+        self._make_profile(repo, "work")
+
+        results = skfl._complete_profiles(None, None, "xyz")
+        assert results == []
+
+    def test_profiles_empty_prefix_dir(self, repo):
+        # _profiles/ dir doesn't exist
+        results = skfl._complete_profiles(None, None, "")
+        assert results == []
+
+    def test_profiles_no_repo(self, tmp_dir):
+        results = skfl._complete_profiles(None, None, "")
+        assert results == []
+
+    def test_profiles_returns_completion_items(self, repo_with_source):
+        from click.shell_completion import CompletionItem
+        repo = repo_with_source
+        self._make_profile(repo, "laptop")
+
+        results = skfl._complete_profiles(None, None, "")
+        assert all(isinstance(r, CompletionItem) for r in results)
+
+    def test_profiles_ignores_files_in_profiles_dir(self, repo_with_source):
+        # Only directories should be listed, not stray files
+        repo = repo_with_source
+        self._make_profile(repo, "work")
+        # Write a stray file directly in _profiles/
+        (repo / skfl.PATCHES_DIR / "_profiles" / "stray.txt").write_text("oops")
+
+        results = skfl._complete_profiles(None, None, "")
+        values = {r.value for r in results}
+        assert "work" in values
+        assert "stray.txt" not in values
+
+
+# ── completion command ────────────────────────────────────────────────
+
+
+class TestCompletionCommand:
+    """Tests for 'skfl completion' setup-instructions command."""
+
+    def test_bash_output(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion", "bash"])
+        assert result.exit_code == 0
+        assert "_SKFL_COMPLETE=bash_source skfl" in result.output
+
+    def test_zsh_output(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion", "zsh"])
+        assert result.exit_code == 0
+        assert "_SKFL_COMPLETE=zsh_source skfl" in result.output
+
+    def test_fish_output(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion", "fish"])
+        assert result.exit_code == 0
+        assert "_SKFL_COMPLETE=fish_source skfl" in result.output
+
+    def test_no_arg_prints_all_shells(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion"])
+        assert result.exit_code == 0
+        assert "_SKFL_COMPLETE=bash_source skfl" in result.output
+        assert "_SKFL_COMPLETE=zsh_source skfl" in result.output
+        assert "_SKFL_COMPLETE=fish_source skfl" in result.output
+
+    def test_invalid_shell_rejected(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion", "powershell"])
+        assert result.exit_code != 0
+
+    def test_bash_output_contains_eval_hint(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion", "bash"])
+        assert "eval" in result.output
+
+    def test_fish_output_contains_source(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion", "fish"])
+        assert "source" in result.output
+
+
+# ── completion wiring (parameter introspection) ───────────────────────
+
+
+class TestCompletionWiring:
+    """Verify shell_complete callbacks are wired onto the right Click parameters.
+
+    Click 8.x stores the custom completion callback at param._custom_shell_complete
+    (the param.shell_complete name is taken by the method that invokes it).
+    """
+
+    def _custom_complete(self, command, param_name):
+        p = next(p for p in command.params if p.name == param_name)
+        return p._custom_shell_complete
+
+    def test_vet_default_files_wired(self):
+        assert self._custom_complete(skfl.vet_default, "files") is skfl._complete_source_files
+
+    def test_vet_status_files_wired(self):
+        assert self._custom_complete(skfl.vet_status, "files") is skfl._complete_source_files
+
+    def test_patch_create_source_file_wired(self):
+        assert self._custom_complete(skfl.patch_create, "source_file") is skfl._complete_source_files
+
+    def test_patch_list_source_file_wired(self):
+        assert self._custom_complete(skfl.patch_list, "source_file") is skfl._complete_source_files
+
+    def test_patch_remove_patch_file_wired(self):
+        assert self._custom_complete(skfl.patch_remove, "patch_file") is skfl._complete_patch_files
+
+    def test_stage_default_files_wired(self):
+        assert self._custom_complete(skfl.stage_default, "files") is skfl._complete_source_files
+
+    def test_stage_default_profile_wired(self):
+        assert self._custom_complete(skfl.stage_default, "profile") is skfl._complete_profiles
+
+    def test_stage_list_profile_wired(self):
+        assert self._custom_complete(skfl.stage_list, "profile") is skfl._complete_profiles

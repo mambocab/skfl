@@ -325,6 +325,58 @@ def do_vet_files(repo: Path, files: list[str]) -> None:
         vet_single_file(repo, rel)
 
 
+def _complete_source_files(ctx, param, incomplete):
+    """Shell-completion callback: source files from 10_sources/ (repo-relative paths)."""
+    from click.shell_completion import CompletionItem
+    try:
+        repo = find_repo()
+    except click.ClickException:
+        return []
+    sources = repo / SOURCES_DIR
+    if not sources.is_dir():
+        return []
+    return [
+        CompletionItem(str(p.relative_to(sources)))
+        for p in sorted(sources.rglob("*"))
+        if p.is_file() and p.name != ".gitkeep"
+        and str(p.relative_to(sources)).startswith(incomplete)
+    ]
+
+
+def _complete_patch_files(ctx, param, incomplete):
+    """Shell-completion callback: patch files from 30_patches/ (repo-relative paths)."""
+    from click.shell_completion import CompletionItem
+    try:
+        repo = find_repo()
+    except click.ClickException:
+        return []
+    patches_root = repo / PATCHES_DIR
+    if not patches_root.is_dir():
+        return []
+    return [
+        CompletionItem(str(p.relative_to(repo)))
+        for p in sorted(patches_root.rglob("*.patch"))
+        if str(p.relative_to(repo)).startswith(incomplete)
+    ]
+
+
+def _complete_profiles(ctx, param, incomplete):
+    """Shell-completion callback: profile names from 30_patches/_profiles/ subdirectories."""
+    from click.shell_completion import CompletionItem
+    try:
+        repo = find_repo()
+    except click.ClickException:
+        return []
+    profiles_dir = repo / PATCHES_DIR / "_profiles"
+    if not profiles_dir.is_dir():
+        return []
+    return [
+        CompletionItem(p.name)
+        for p in sorted(profiles_dir.iterdir())
+        if p.is_dir() and p.name.startswith(incomplete)
+    ]
+
+
 def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> None:
     """Stage the given source files, optionally under a named profile."""
     files = expand_paths(repo, files)
@@ -572,7 +624,7 @@ def vet(ctx):
 
 
 @vet.command("_default", hidden=True)
-@click.argument("files", nargs=-1, required=True, type=click.Path())
+@click.argument("files", nargs=-1, required=True, type=click.Path(), shell_complete=_complete_source_files)
 def vet_default(files):
     """Vet the specified source files."""
     r = find_repo()
@@ -580,7 +632,7 @@ def vet_default(files):
 
 
 @vet.command("status")
-@click.argument("files", nargs=-1, type=click.Path())
+@click.argument("files", nargs=-1, type=click.Path(), shell_complete=_complete_source_files)
 def vet_status(files):
     """Show vetting status of source files."""
     r = find_repo()
@@ -611,7 +663,7 @@ def patch():
 
 
 @patch.command("create")
-@click.argument("source_file", type=click.Path())
+@click.argument("source_file", type=click.Path(), shell_complete=_complete_source_files)
 @click.option("--name", "-n", default=None, help="Short description for the patch filename.")
 def patch_create(source_file, name):
     """Create a new patch for a vetted source file."""
@@ -694,7 +746,7 @@ def patch_create(source_file, name):
 
 
 @patch.command("list")
-@click.argument("source_file", required=False, type=click.Path())
+@click.argument("source_file", required=False, type=click.Path(), shell_complete=_complete_source_files)
 def patch_list(source_file):
     """List patches, optionally for a specific source file."""
     r = find_repo()
@@ -726,7 +778,7 @@ def patch_list(source_file):
 
 
 @patch.command("remove")
-@click.argument("patch_file", type=click.Path())
+@click.argument("patch_file", type=click.Path(), shell_complete=_complete_patch_files)
 def patch_remove(patch_file):
     """Remove a patch."""
     r = find_repo()
@@ -765,8 +817,8 @@ def stage(ctx):
 
 
 @stage.command("_default", hidden=True)
-@click.option("--as", "profile", default=None, help="Stage under a named profile for variant installations.")
-@click.argument("files", nargs=-1, required=True, type=click.Path())
+@click.option("--as", "profile", default=None, help="Stage under a named profile for variant installations.", shell_complete=_complete_profiles)
+@click.argument("files", nargs=-1, required=True, type=click.Path(), shell_complete=_complete_source_files)
 def stage_default(profile, files):
     """Stage the specified source files."""
     r = find_repo()
@@ -774,7 +826,7 @@ def stage_default(profile, files):
 
 
 @stage.command("list")
-@click.option("--as", "profile", default=None, help="List files staged under a named profile.")
+@click.option("--as", "profile", default=None, help="List files staged under a named profile.", shell_complete=_complete_profiles)
 def stage_list(profile):
     """Show currently staged files."""
     r = find_repo()
@@ -927,6 +979,48 @@ def package_install_stow(name, target):
         check=True,
     )
     click.echo(f"Installed package '{name}' to {target_path} via stow.")
+
+
+# ── completion ─────────────────────────────────────────────────────────
+
+@cli.command("completion")
+@click.argument("shell", required=False, type=click.Choice(["bash", "zsh", "fish"]))
+def completion(shell):
+    """Print shell completion setup instructions.
+
+    SHELL may be bash, zsh, or fish. Omit to print instructions for all shells.
+    """
+    if shell in (None, "bash"):
+        click.echo("# bash — add to ~/.bashrc:")
+        click.echo('eval "$(_SKFL_COMPLETE=bash_source skfl)"')
+        if shell is None:
+            click.echo()
+    if shell in (None, "zsh"):
+        click.echo("# zsh — add to ~/.zshrc:")
+        click.echo('eval "$(_SKFL_COMPLETE=zsh_source skfl)"')
+        if shell is None:
+            click.echo()
+    if shell in (None, "fish"):
+        click.echo("# fish — add to ~/.config/fish/completions/skfl.fish:")
+        click.echo("_SKFL_COMPLETE=fish_source skfl | source")
+
+
+# ── top-level shortcuts ───────────────────────────────────────────────
+
+@cli.command("rsync")
+@click.argument("target", type=click.Path())
+@click.pass_context
+def rsync_shortcut(ctx, target):
+    """Shortcut for 'skfl install rsync'."""
+    ctx.invoke(install_rsync, target=target)
+
+
+@cli.command("stow")
+@click.argument("target", type=click.Path())
+@click.pass_context
+def stow_shortcut(ctx, target):
+    """Shortcut for 'skfl install stow'."""
+    ctx.invoke(install_stow, target=target)
 
 
 if __name__ == "__main__":

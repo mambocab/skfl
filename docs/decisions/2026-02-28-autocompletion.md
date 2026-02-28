@@ -1,0 +1,115 @@
+# Technical Decisions: Shell Autocompletion
+
+Date: 2026-02-28
+
+## Overview
+
+Added shell autocompletion for bash, zsh, and fish via Click 8.x's built-in
+completion mechanism.  Three completion callback functions were added, wired
+onto eight Click parameters, and a `skfl completion` command was added to help
+users enable completion in their shell.
+
+---
+
+## Decision 1: Use Click's native `shell_complete` parameter
+
+**Options considered:**
+
+1. *Click's native `shell_complete` kwarg on `@click.argument` / `@click.option`* –
+   passes a callback `(ctx, param, incomplete) -> list[CompletionItem]` directly
+   in the decorator.  Users enable completion by evaluating the script that
+   `_SKFL_COMPLETE=bash_source skfl` prints.
+2. *Custom `ShellComplete` subclass* – overrides the entire completion engine.
+   More powerful, but requires touching Click internals.
+3. *External completion scripts* (hand-written Bash/Zsh/Fish files) – portable
+   but must be kept in sync with the CLI manually.
+
+**Decision:** Option 1.  It is idiomatic Click 8.x, requires no external files,
+and is automatically correct whenever the CLI changes.
+
+---
+
+## Decision 2: Three focused completion helpers, not one generic one
+
+Three functions cover all distinct completion domains:
+
+| Function | Completes | Used by |
+|---|---|---|
+| `_complete_source_files` | Paths in `10_sources/`, repo-relative | `vet`, `patch create/list`, `stage` |
+| `_complete_patch_files` | `*.patch` files under `30_patches/`, repo-relative from repo root | `patch remove` |
+| `_complete_profiles` | Directory names under `30_patches/_profiles/` | `stage --as` |
+
+A fourth function `_complete_source_names` (source keys from `skfl.toml`) was
+considered but there is currently no command that accepts an existing source
+name as an argument, so it was not added to avoid dead code.
+
+---
+
+## Decision 3: Lazy import of `click.shell_completion`
+
+`from click.shell_completion import CompletionItem` is imported inside each
+callback instead of at module level.  This keeps the import invisible during
+normal command execution (completion callbacks are only called by the shell
+completion machinery) and avoids any risk of import-time side effects from that
+submodule.
+
+---
+
+## Decision 4: Fail silently when no repo is found
+
+All three callbacks return `[]` when `find_repo()` raises `ClickException`
+(i.e. when the cwd is not inside an skfl repo).  Raising an exception inside a
+completion callback would produce confusing shell output; returning an empty
+list gives the user a no-op completion, which is the least surprising behaviour.
+
+---
+
+## Decision 5: Add `skfl completion [SHELL]` command
+
+Click's built-in completion requires the user to run an `eval` line in their
+shell profile—a step that is not obvious from `skfl --help`.  A `completion`
+subcommand that prints the exact lines to add was added.  Without a SHELL
+argument it prints instructions for all three shells.
+
+The `SHELL` argument uses `click.Choice(["bash", "zsh", "fish"])` so that
+invalid shell names are rejected with a clear error message.
+
+---
+
+## Decision 6: `DefaultCommandGroup` and completion for `vet`/`stage`
+
+`vet` and `stage` use `DefaultCommandGroup`, which routes unrecognised tokens to
+a hidden `_default` command.  This has a known limitation for shell completion:
+
+- `skfl vet <TAB>` completes only `status` (the single visible subcommand).
+- `skfl vet status <TAB>` **does** complete source files (via `vet_status.files`).
+- `skfl vet already/typed.py <TAB>` **also** completes source files: Click's
+  completion resolver calls `DefaultCommandGroup.resolve_command`, which
+  prepends `_default` for non-command tokens, so the `_default.files` callback
+  runs for subsequent arguments.
+
+The gap—no source-file completion for the *first* token after bare `skfl vet`—
+was accepted.  Users can always use `skfl vet status <TAB>` to get full
+completion.  Overriding Click's internal `_resolve_context` to paper over this
+gap would be fragile and disproportionate to the benefit.
+
+---
+
+## Decision 7: Test strategy
+
+Tests are split into three classes in `tests/test_skfl.py`:
+
+1. **`TestCompletionHelpers`** – calls each function directly with `(None, None,
+   incomplete)`.  Covers: all files returned, `.gitkeep` excluded, prefix
+   filtering, no-match prefix, no-repo graceful return, correct
+   `CompletionItem` types, subdirectory paths, file vs directory discrimination.
+2. **`TestCompletionCommand`** – uses Click's `CliRunner` to invoke
+   `skfl completion [SHELL]` and asserts on stdout content.
+3. **`TestCompletionWiring`** – reads `param._custom_shell_complete` (the
+   attribute where Click 8.x stores the callback passed as `shell_complete=`)
+   and asserts it is the expected function.  This prevents accidental
+   disconnection of a callback from its parameter.
+
+The `_custom_shell_complete` attribute is a Click implementation detail but is
+stable across Click 8.x.  If a future Click version renames it, the wiring
+tests will fail loudly, which is the desired behaviour.
