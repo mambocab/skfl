@@ -9,6 +9,15 @@
 
 set -euo pipefail
 
+EXTRA_CMDS=()
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --with) EXTRA_CMDS+=("$2"); shift 2 ;;
+        --with=*) EXTRA_CMDS+=("${1#--with=}"); shift ;;
+        *) echo "usage: dev-shell [--with CMD]..." >&2; exit 1 ;;
+    esac
+done
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 
@@ -24,9 +33,13 @@ mkdir -p "$BIN"
 
 for cmd in uv python3 git diff patch less env sh \
            cat cp mkdir rm chmod ls wc head tail sort find sed \
-           rsync stow glow fzf; do
+           rsync stow glow fzf "${EXTRA_CMDS[@]}"; do
     p="$(command -v "$cmd" 2>/dev/null || true)"
-    [ -n "$p" ] && ln -s "$p" "$BIN/$cmd"
+    if [ -n "$p" ]; then
+        ln -s "$p" "$BIN/$cmd"
+    else
+        echo "warning: $cmd not found" >&2
+    fi
 done
 
 # skfl: copy the source and create a thin wrapper that invokes it via `uv run`.
