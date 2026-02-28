@@ -128,6 +128,17 @@ class TestInit:
         assert result.exit_code == 0
         assert (target / skfl.SKFL_TOML).exists()
 
+    def test_creates_packages_directory(self, tmp_dir):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["init", str(tmp_dir)])
+        assert result.exit_code == 0
+        assert (tmp_dir / "50_packages").is_dir()
+
+    def test_creates_gitkeep_in_packages(self, tmp_dir):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["init", str(tmp_dir)])
+        assert (tmp_dir / "50_packages" / ".gitkeep").is_file()
+
 
 # ── config ─────────────────────────────────────────────────────────────
 

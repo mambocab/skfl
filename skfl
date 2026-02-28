@@ -24,10 +24,11 @@ SOURCES_DIR = "10_sources"
 VETTED_DIR = "20_vetted"
 PATCHES_DIR = "30_patches"
 STAGED_DIR = "40_staged"
+PACKAGES_DIR = "50_packages"
 
 SKFL_TOML = "skfl.toml"
 
-REPO_DIRS = [SOURCES_DIR, VETTED_DIR, PATCHES_DIR, STAGED_DIR]
+REPO_DIRS = [SOURCES_DIR, VETTED_DIR, PATCHES_DIR, STAGED_DIR, PACKAGES_DIR]
 
 
 # ── helpers ────────────────────────────────────────────────────────────
