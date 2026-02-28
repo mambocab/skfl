@@ -110,6 +110,54 @@ class TestFindRepo:
         values = {r.value for r in results}
         assert "custom/test-src/hello.md" in values
 
+    def test_default_home_repo_used_when_no_repo_found(self, tmp_path, monkeypatch):
+        # When cwd is outside any repo and $SKFL_REPO is unset, ~/.skfl is tried
+        monkeypatch.delenv("SKFL_REPO", raising=False)
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        skfl_repo = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(skfl_repo)])
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        assert skfl.find_repo(outside) == skfl_repo
+
+    def test_default_home_repo_ignored_when_no_skfl_toml(self, tmp_dir, monkeypatch, tmp_path):
+        # ~/.skfl exists but has no skfl.toml → still raises
+        monkeypatch.delenv("SKFL_REPO", raising=False)
+        fake_home = tmp_path / "home"
+        (fake_home / ".skfl").mkdir(parents=True)  # exists but no skfl.toml
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        with pytest.raises(Exception, match="Not inside an skfl repository"):
+            skfl.find_repo(tmp_dir)
+
+    def test_local_repo_takes_priority_over_default_home_repo(self, repo, tmp_path, monkeypatch):
+        # When cwd is inside a repo, the local repo wins over ~/.skfl
+        monkeypatch.delenv("SKFL_REPO", raising=False)
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        # Put a valid skfl repo at fake_home/.skfl too
+        other = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(other)])
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        assert skfl.find_repo(repo) == repo
+
+    def test_completion_works_via_default_home_repo(self, tmp_path, monkeypatch):
+        # Completions work when the repo lives at ~/.skfl and $SKFL_REPO is unset
+        monkeypatch.delenv("SKFL_REPO", raising=False)
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        skfl_repo = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(skfl_repo)])
+        # Manually place a source file (avoids cwd dependency on the CLI)
+        src_file = skfl_repo / skfl.SOURCES_DIR / "custom" / "test-src" / "hello.md"
+        src_file.parent.mkdir(parents=True, exist_ok=True)
+        src_file.write_text("# Hello\n")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        results = skfl._complete_source_files(None, None, "")
+        values = {r.value for r in results}
+        assert "custom/test-src/hello.md" in values
+
 
 # ── init ───────────────────────────────────────────────────────────────
 

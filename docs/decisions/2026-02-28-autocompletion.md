@@ -55,12 +55,25 @@ submodule.
 
 ---
 
-## Decision 4: Fail silently when no repo is found
+## Decision 4: Repo discovery order and defaults
 
-All three callbacks return `[]` when `find_repo()` raises `ClickException`
-(i.e. when the cwd is not inside an skfl repo).  Raising an exception inside a
-completion callback would produce confusing shell output; returning an empty
-list gives the user a no-op completion, which is the least surprising behaviour.
+`find_repo()` tries three locations in order before raising:
+
+1. **cwd walk** – traverse from `start` (default: cwd) up to the filesystem root.
+2. **`$SKFL_REPO`** – if set and points at a directory containing `skfl.toml`, use it.
+3. **`~/.skfl`** – if `~/.skfl/skfl.toml` exists, use it as the default repo.
+
+This means:
+- Commands and completions work from any directory once the user has a repo at
+  `~/.skfl` — the common single-user case requires zero configuration.
+- Multi-repo users or CI can override with `$SKFL_REPO` without touching cwd.
+- `$SKFL_REPO` takes priority over the default so it can point at a different
+  repo while `~/.skfl` remains untouched.
+
+All three completion callbacks return `[]` when `find_repo()` still raises after
+all three locations are tried.  Raising inside a completion callback would produce
+confusing shell output; returning an empty list gives a silent no-op, which is
+the least surprising behaviour.
 
 ---
 

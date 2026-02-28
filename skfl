@@ -51,9 +51,12 @@ def find_repo(start: Path | None = None) -> Path:
         candidate = Path(env_repo).expanduser().resolve()
         if (candidate / SKFL_TOML).is_file():
             return candidate
+    default_repo = Path.home() / ".skfl"
+    if (default_repo / SKFL_TOML).is_file():
+        return default_repo
     raise click.ClickException(
         "Not inside an skfl repository (no skfl.toml found). "
-        "Run 'skfl init' to create one, or set $SKFL_REPO."
+        "Run 'skfl init ~/.skfl' to create one, or set $SKFL_REPO."
     )
 
 
@@ -1005,8 +1008,8 @@ def completion(shell):
       skfl completion fish > ~/.config/fish/completions/skfl.fish
 
     \b
-    For completions to work from any directory, set $SKFL_REPO in the same
-    shell profile file, pointing at your skfl repository:
+    For completions to work from any directory, skfl automatically falls back
+    to ~/.skfl if it exists.  To use a different location, set $SKFL_REPO:
       export SKFL_REPO=~/path/to/your/skfl-repo
     """
     from click.shell_completion import BashComplete, ZshComplete, FishComplete
