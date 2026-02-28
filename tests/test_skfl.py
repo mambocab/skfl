@@ -132,12 +132,12 @@ class TestInit:
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["init", str(tmp_dir)])
         assert result.exit_code == 0
-        assert (tmp_dir / "50_packages").is_dir()
+        assert (tmp_dir / skfl.PACKAGES_DIR).is_dir()
 
     def test_creates_gitkeep_in_packages(self, tmp_dir):
         runner = CliRunner()
         runner.invoke(skfl.cli, ["init", str(tmp_dir)])
-        assert (tmp_dir / "50_packages" / ".gitkeep").is_file()
+        assert (tmp_dir / skfl.PACKAGES_DIR / ".gitkeep").is_file()
 
 
 # ── config ─────────────────────────────────────────────────────────────
@@ -1180,7 +1180,7 @@ class TestPackageNew:
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
         assert result.exit_code == 0
-        assert (repo / "50_packages" / "my-pkg").is_dir()
+        assert (repo / skfl.PACKAGES_DIR / "my-pkg").is_dir()
 
     def test_package_new_fails_on_duplicate(self, repo):
         runner = CliRunner()
@@ -1219,7 +1219,7 @@ class TestPackageAdd:
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
         )
         assert result.exit_code == 0
-        symlink = repo_with_source / "50_packages" / "my-pkg" / "hello.md"
+        symlink = repo_with_source / skfl.PACKAGES_DIR / "my-pkg" / "hello.md"
         assert symlink.is_symlink()
         assert symlink.resolve() == (
             repo_with_source / "10_sources" / "custom" / "test-src" / "hello.md"
@@ -1233,7 +1233,7 @@ class TestPackageAdd:
             ["package", "add", "my-pkg", "custom/test-src/sub", "subdir"],
         )
         assert result.exit_code == 0
-        symlink = repo_with_source / "50_packages" / "my-pkg" / "subdir"
+        symlink = repo_with_source / skfl.PACKAGES_DIR / "my-pkg" / "subdir"
         assert symlink.is_symlink()
         assert symlink.resolve() == (
             repo_with_source / "10_sources" / "custom" / "test-src" / "sub"
@@ -1247,7 +1247,7 @@ class TestPackageAdd:
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "deep/nested/hello.md"],
         )
         assert result.exit_code == 0
-        symlink = repo_with_source / "50_packages" / "my-pkg" / "deep" / "nested" / "hello.md"
+        symlink = repo_with_source / skfl.PACKAGES_DIR / "my-pkg" / "deep" / "nested" / "hello.md"
         assert symlink.is_symlink()
 
     def test_package_add_fails_if_package_missing(self, repo_with_source):

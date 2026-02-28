@@ -167,6 +167,28 @@ def all_source_files(repo: Path) -> list[Path]:
     return result
 
 
+def _stage_single_file(
+    repo: Path,
+    source_abs: Path,
+    rel: Path,
+    staged_path: Path,
+    profile: str | None = None,
+) -> int:
+    """Read, patch, and write one source file to its staged location.
+
+    Returns the number of patches applied.
+    """
+    content = source_abs.read_bytes()
+    patches = list_patches_for(repo, rel, profile=profile)
+    if patches:
+        content = apply_patches(content, patches)
+    staged_path.parent.mkdir(parents=True, exist_ok=True)
+    staged_path.write_bytes(content)
+    if os.access(source_abs, os.X_OK):
+        staged_path.chmod(staged_path.stat().st_mode | 0o111)
+    return len(patches)
+
+
 def expand_paths(repo: Path, fpaths: list[str]) -> list[str]:
     """Expand any directory arguments into their constituent source files."""
     sources = repo / SOURCES_DIR
@@ -221,7 +243,8 @@ def do_build_package(repo: Path, name: str, profile: str | None = None) -> None:
 
     sources = repo / SOURCES_DIR
 
-    # Refuse if any file is not cleanly vetted — check all before staging any.
+    # Resolve `rel` once per file and validate vetting before touching disk.
+    resolved: list[tuple[Path, Path, Path]] = []  # (source_abs, rel, dest_rel)
     errors = []
     for source_abs, dest_rel in pairs:
         try:
@@ -232,26 +255,19 @@ def do_build_package(repo: Path, name: str, profile: str | None = None) -> None:
         status = vet_status_for_file(repo, rel)
         if status in ("unvetted", "modified"):
             errors.append(f"  {rel}: {status}")
+        else:
+            resolved.append((source_abs, rel, dest_rel))
     if errors:
         raise click.ClickException(
             "Cannot build package — the following files are not vetted:\n"
             + "\n".join(errors)
         )
 
-    # Stage each file.
-    for source_abs, dest_rel in pairs:
-        rel = source_abs.relative_to(sources)
-        content = source_abs.read_bytes()
-        patches = list_patches_for(repo, rel, profile=profile)
-        if patches:
-            content = apply_patches(content, patches)
+    for source_abs, rel, dest_rel in resolved:
         staged_path = repo / STAGED_DIR / name / dest_rel
-        staged_path.parent.mkdir(parents=True, exist_ok=True)
-        staged_path.write_bytes(content)
-        if os.access(source_abs, os.X_OK):
-            staged_path.chmod(staged_path.stat().st_mode | 0o111)
+        _stage_single_file(repo, source_abs, rel, staged_path, profile=profile)
 
-    click.echo(f"Built package '{name}': {len(pairs)} file(s) staged to 40_staged/{name}/.")
+    click.echo(f"Built package '{name}': {len(resolved)} file(s) staged to 40_staged/{name}/.")
 
 
 def vet_single_file(repo: Path, rel: Path) -> bool:
@@ -330,25 +346,14 @@ def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> 
             if not vet_single_file(repo, rel):
                 continue
 
-        content = source_path.read_bytes()
-
-        patches = list_patches_for(repo, rel, profile=profile)
-        if patches:
-            content = apply_patches(content, patches)
-
         if profile:
             staged_path = repo / STAGED_DIR / profile / rel
         else:
             staged_path = repo / STAGED_DIR / rel
-        staged_path.parent.mkdir(parents=True, exist_ok=True)
-        staged_path.write_bytes(content)
-        if os.access(source_path, os.X_OK):
-            staged_path.chmod(staged_path.stat().st_mode | 0o111)
-
-        n_patches = len(patches)
+        n_patches = _stage_single_file(repo, source_path, rel, staged_path, profile=profile)
         patch_note = (
             f" ({n_patches} patch{'es' if n_patches != 1 else ''} applied)"
-            if patches
+            if n_patches
             else ""
         )
         profile_note = f" [profile: {profile}]" if profile else ""
@@ -877,6 +882,20 @@ def package_build(name, profile):
     do_build_package(r, name, profile=profile)
 
 
+def _resolve_install_paths(repo: Path, name: str, tool: str, target: str) -> tuple[Path, Path]:
+    """Validate a package is built and a tool is available; return (staged_dir, target_path)."""
+    staged = repo / STAGED_DIR / name
+    if not staged.is_dir():
+        raise click.ClickException(
+            f"Package '{name}' has not been built. Run 'skfl package build {name}' first."
+        )
+    if not shutil.which(tool):
+        raise click.ClickException(f"{tool} is not installed. Install it and try again.")
+    target_path = Path(target).resolve()
+    target_path.mkdir(parents=True, exist_ok=True)
+    return staged, target_path
+
+
 @package.group()
 def install():
     """Install a built package to a target directory."""
@@ -888,15 +907,7 @@ def install():
 def package_install_rsync(name, target):
     """Install a package using rsync."""
     r = find_repo()
-    staged = r / STAGED_DIR / name
-    if not staged.is_dir():
-        raise click.ClickException(
-            f"Package '{name}' has not been built. Run 'skfl package build {name}' first."
-        )
-    if not shutil.which("rsync"):
-        raise click.ClickException("rsync is not installed. Install it and try again.")
-    target_path = Path(target).resolve()
-    target_path.mkdir(parents=True, exist_ok=True)
+    staged, target_path = _resolve_install_paths(r, name, "rsync", target)
     subprocess.run(
         ["rsync", "-av", "--exclude=.gitkeep", str(staged) + "/", str(target_path)],
         check=True,
@@ -910,15 +921,7 @@ def package_install_rsync(name, target):
 def package_install_stow(name, target):
     """Install a package using GNU Stow."""
     r = find_repo()
-    staged = r / STAGED_DIR / name
-    if not staged.is_dir():
-        raise click.ClickException(
-            f"Package '{name}' has not been built. Run 'skfl package build {name}' first."
-        )
-    if not shutil.which("stow"):
-        raise click.ClickException("GNU Stow is not installed. Install it and try again.")
-    target_path = Path(target).resolve()
-    target_path.mkdir(parents=True, exist_ok=True)
+    staged, target_path = _resolve_install_paths(r, name, "stow", target)
     subprocess.run(
         ["stow", "--dir", str(r / STAGED_DIR), "--target", str(target_path), name],
         check=True,
