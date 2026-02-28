@@ -22,7 +22,7 @@ trap cleanup EXIT
 BIN="$WORK/.local/bin"
 mkdir -p "$BIN"
 
-for cmd in python3 git diff patch less env sh \
+for cmd in uv python3 git diff patch less env sh \
            cat cp mkdir rm chmod ls wc head tail sort find sed \
            rsync stow glow fzf; do
     p="$(command -v "$cmd" 2>/dev/null || true)"
@@ -30,11 +30,11 @@ for cmd in python3 git diff patch less env sh \
 done
 
 # skfl: the real script uses a `uv run` shebang that won't be on PATH.
-# Store the source and create a thin wrapper that invokes python3 directly.
+# Store the source and create a thin wrapper that invokes it via `uv run`.
 cp "$SCRIPT_DIR/skfl" "$WORK/.local/skfl.py"
 cat > "$BIN/skfl" <<'WRAPPER'
 #!/bin/sh
-exec python3 "${0%/*}/../skfl.py" "$@"
+exec uv run --script "${0%/*}/../skfl.py" "$@"
 WRAPPER
 chmod +x "$BIN/skfl"
 
