@@ -361,6 +361,21 @@ class TestVetCommand:
         rel = Path("custom/test-src/hello.md")
         assert skfl.read_vetted_hash(repo_with_vetted, rel) == skfl.file_hash(source)
 
+    def test_vet_directory(self, repo_with_source):
+        runner = CliRunner()
+        # Approve all 3 files in the directory
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli, ["vet", "custom/test-src"], input="y\ny\ny\n"
+            )
+        assert result.exit_code == 0
+        assert result.output.count(": vetted.") == 3
+
+        # Verify all files are now vetted
+        for name in ["hello.md", "script.py", "sub/nested.txt"]:
+            rel = Path(f"custom/test-src/{name}")
+            assert skfl.vet_status_for_file(repo_with_source, rel) == "vetted"
+
     def test_vet_nonexistent_file(self, repo_with_source):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["vet", "custom/test-src/nope.md"])
@@ -655,6 +670,37 @@ class TestStageCommand:
         assert result.exit_code == 0
         assert result.output.count("staged:") == 2
 
+    def test_stage_directory(self, repo_with_vetted):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["stage", "custom/test-src"])
+        assert result.exit_code == 0
+        assert result.output.count("staged:") == 3
+
+        repo = repo_with_vetted
+        assert (repo / skfl.STAGED_DIR / "custom/test-src/hello.md").exists()
+        assert (repo / skfl.STAGED_DIR / "custom/test-src/script.py").exists()
+        assert (repo / skfl.STAGED_DIR / "custom/test-src/sub/nested.txt").exists()
+
+    def test_stage_subdirectory(self, repo_with_vetted):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["stage", "custom/test-src/sub"])
+        assert result.exit_code == 0
+        assert result.output.count("staged:") == 1
+        assert (repo_with_vetted / skfl.STAGED_DIR / "custom/test-src/sub/nested.txt").exists()
+
+    def test_stage_directory_with_profile(self, repo_with_vetted):
+        runner = CliRunner()
+        result = runner.invoke(
+            skfl.cli, ["stage", "--as", "myprofile", "custom/test-src/sub"]
+        )
+        assert result.exit_code == 0
+        assert "profile: myprofile" in result.output
+        assert (
+            repo_with_vetted
+            / skfl.STAGED_DIR
+            / "myprofile/custom/test-src/sub/nested.txt"
+        ).exists()
+
 
 # ── stage list ─────────────────────────────────────────────────────────
 
@@ -708,6 +754,58 @@ class TestSourcePullParsing:
         result = runner.invoke(skfl.cli, ["source", "pull"])
         assert result.exit_code != 0
         assert "Specify" in result.output
+
+
+# ── resolve_to_source_rel ─────────────────────────────────────────────
+
+
+# ── expand_paths ───────────────────────────────────────────────────────
+
+
+class TestExpandPaths:
+    def test_expands_directory_to_files(self, repo_with_source):
+        result = skfl.expand_paths(repo_with_source, ["custom/test-src"])
+        assert len(result) == 3
+        assert "custom/test-src/hello.md" in result
+        assert "custom/test-src/script.py" in result
+        assert "custom/test-src/sub/nested.txt" in result
+
+    def test_expands_subdirectory(self, repo_with_source):
+        result = skfl.expand_paths(repo_with_source, ["custom/test-src/sub"])
+        assert result == ["custom/test-src/sub/nested.txt"]
+
+    def test_leaves_files_unchanged(self, repo_with_source):
+        result = skfl.expand_paths(
+            repo_with_source, ["custom/test-src/hello.md"]
+        )
+        assert result == ["custom/test-src/hello.md"]
+
+    def test_mixed_files_and_dirs(self, repo_with_source):
+        result = skfl.expand_paths(
+            repo_with_source,
+            ["custom/test-src/hello.md", "custom/test-src/sub"],
+        )
+        assert "custom/test-src/hello.md" in result
+        assert "custom/test-src/sub/nested.txt" in result
+        assert len(result) == 2
+
+    def test_excludes_gitkeep(self, repo_with_source):
+        # .gitkeep exists in the sources dir
+        result = skfl.expand_paths(repo_with_source, ["."])
+        names = [Path(f).name for f in result]
+        assert ".gitkeep" not in names
+
+    def test_passes_through_invalid_paths(self, repo_with_source):
+        # Invalid paths are passed through for downstream error handling
+        result = skfl.expand_paths(repo_with_source, ["/tmp/nonexistent"])
+        assert result == ["/tmp/nonexistent"]
+
+    def test_absolute_directory_path(self, repo_with_source):
+        abs_dir = str(
+            repo_with_source / skfl.SOURCES_DIR / "custom" / "test-src" / "sub"
+        )
+        result = skfl.expand_paths(repo_with_source, [abs_dir])
+        assert result == ["custom/test-src/sub/nested.txt"]
 
 
 # ── resolve_to_source_rel ─────────────────────────────────────────────
