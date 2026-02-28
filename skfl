@@ -615,23 +615,15 @@ def source_list():
 
 # ── vet ────────────────────────────────────────────────────────────────
 
-@cli.group(cls=DefaultCommandGroup, invoke_without_command=True)
-@click.pass_context
-def vet(ctx):
-    """Vet source files. Usage: skfl vet <files> | skfl vet status"""
-    if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
-
-
-@vet.command("_default", hidden=True)
+@cli.command("vet")
 @click.argument("files", nargs=-1, required=True, type=click.Path(), shell_complete=_complete_source_files)
-def vet_default(files):
-    """Vet the specified source files."""
+def vet(files):
+    """Vet source files by reviewing and approving their content."""
     r = find_repo()
     do_vet_files(r, list(files))
 
 
-@vet.command("status")
+@cli.command("vet-status")
 @click.argument("files", nargs=-1, type=click.Path(), shell_complete=_complete_source_files)
 def vet_status(files):
     """Show vetting status of source files."""

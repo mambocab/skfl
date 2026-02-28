@@ -95,6 +95,30 @@ gap would be fragile and disproportionate to the benefit.
 
 ---
 
+## Decision 8: Separate `vet` and `vet-status` into top-level commands
+
+**Original design:** `vet` was a `DefaultCommandGroup` with a hidden `_default`
+subcommand for the actual vetting action and a visible `status` subcommand.
+This meant `skfl vet status` showed vet status and `skfl vet <files>` routed
+through `_default`.
+
+**Problem:** The `DefaultCommandGroup` routing broke tab-completion for the
+first file token: `skfl vet <TAB>` would show `status` instead of source
+files.
+
+**Change:** `vet` is now a plain `@cli.command` that takes `files` directly.
+`vet-status` is a separate top-level `@cli.command`.  `DefaultCommandGroup` is
+retained only for `stage`, where the `list` subcommand coexists with direct
+file staging.
+
+**Benefits:**
+- `skfl vet <TAB>` now completes source files immediately with no workaround.
+- No hidden `_default` routing needed for `vet`; the code is simpler.
+- `skfl vet-status <TAB>` also completes source files directly.
+- The two commands are now independently discoverable in `skfl --help`.
+
+---
+
 ## Decision 7: Test strategy
 
 Tests are split into three classes in `tests/test_skfl.py`:

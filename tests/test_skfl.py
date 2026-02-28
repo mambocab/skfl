@@ -289,14 +289,14 @@ class TestVetStatus:
 class TestVetStatusCommand:
     def test_shows_all_files(self, repo_with_source):
         runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["vet", "status"])
+        result = runner.invoke(skfl.cli, ["vet-status"])
         assert result.exit_code == 0
         assert "unvetted" in result.output
         assert "hello.md" in result.output
 
     def test_shows_vetted_status(self, repo_with_vetted):
         runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["vet", "status"])
+        result = runner.invoke(skfl.cli, ["vet-status"])
         assert result.exit_code == 0
         assert "vetted" in result.output
 
@@ -306,13 +306,13 @@ class TestVetStatusCommand:
         source.write_text("# Modified\n")
 
         runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["vet", "status"])
+        result = runner.invoke(skfl.cli, ["vet-status"])
         assert result.exit_code == 0
         assert "modified" in result.output
 
     def test_no_source_files(self, repo):
         runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["vet", "status"])
+        result = runner.invoke(skfl.cli, ["vet-status"])
         assert "No source files" in result.output
 
 
@@ -888,7 +888,7 @@ class TestFullWorkflow:
         runner = CliRunner()
 
         # Verify source files exist and are vetted
-        result = runner.invoke(skfl.cli, ["vet", "status"])
+        result = runner.invoke(skfl.cli, ["vet-status"])
         assert "vetted" in result.output
 
         # Stage a file
@@ -942,7 +942,7 @@ class TestFullWorkflow:
         source.write_text("# Hello Updated\n\nNew content\n")
 
         # Vet status should show modified
-        result = runner.invoke(skfl.cli, ["vet", "status"])
+        result = runner.invoke(skfl.cli, ["vet-status"])
         assert "modified" in result.output
 
         # Staging should prompt for re-vetting, then stage on approval
@@ -1739,8 +1739,8 @@ class TestCompletionWiring:
         p = next(p for p in command.params if p.name == param_name)
         return p._custom_shell_complete
 
-    def test_vet_default_files_wired(self):
-        assert self._custom_complete(skfl.vet_default, "files") is skfl._complete_source_files
+    def test_vet_files_wired(self):
+        assert self._custom_complete(skfl.vet, "files") is skfl._complete_source_files
 
     def test_vet_status_files_wired(self):
         assert self._custom_complete(skfl.vet_status, "files") is skfl._complete_source_files
