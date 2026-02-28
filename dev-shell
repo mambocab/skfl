@@ -1,49 +1,26 @@
 #!/usr/bin/env bash
-# dev-shell — drop into a chroot for interactive skfl testing.
+# dev-shell — drop into an isolated shell for interactive skfl testing.
 #
-# Sets up a minimal chroot with $REPO/.local/bin containing symlinks to
-# host executables (via bind-mounted host dirs), copies skfl into .local/bin,
-# initialises a fresh skfl repo, and execs an interactive shell.
+# Creates a temp directory with .local/bin containing symlinks to host
+# executables, copies skfl into .local/bin, initialises a fresh skfl
+# repo, and execs an interactive shell with PATH restricted to .local/bin.
 #
-# Requires root (for chroot / mount --bind).  Cleans up on exit.
+# Cleans up the temp directory on exit.
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ROOT="$(mktemp -d)"
-REPO="/repo"
-
-# ── cleanup ───────────────────────────────────────────────────────────
+WORK="$(mktemp -d)"
 
 cleanup() {
-    for mp in "$ROOT"/usr "$ROOT"/lib "$ROOT"/lib64 "$ROOT"/bin; do
-        mountpoint -q "$mp" 2>/dev/null && umount "$mp" || true
-    done
-    rm -rf "$ROOT"
+    rm -rf "$WORK"
 }
 trap cleanup EXIT
 
-# ── chroot skeleton ───────────────────────────────────────────────────
-
-mkdir -p "$ROOT"/{bin,usr,lib,tmp,dev,etc}
-[ -d /lib64 ] && mkdir -p "$ROOT/lib64"
-mkdir -p "$ROOT$REPO/.local/bin"
-
-# Bind-mount host system dirs so symlinks resolve inside the chroot.
-mount --bind /usr "$ROOT/usr"
-mount --bind /lib "$ROOT/lib"
-mount --bind /bin "$ROOT/bin"
-[ -d /lib64 ] && mount --bind /lib64 "$ROOT/lib64"
-
-# /dev/null
-cp -a /dev/null "$ROOT/dev/null" 2>/dev/null \
-    || mknod "$ROOT/dev/null" c 1 3 2>/dev/null \
-    || true
-chmod 666 "$ROOT/dev/null" 2>/dev/null || true
-
 # ── .local/bin — symlinks to host executables ─────────────────────────
 
-BIN="$ROOT$REPO/.local/bin"
+BIN="$WORK/.local/bin"
+mkdir -p "$BIN"
 
 for cmd in python3 git diff patch less env sh \
            cat cp mkdir rm chmod ls wc head tail sort find sed \
@@ -52,35 +29,29 @@ for cmd in python3 git diff patch less env sh \
     [ -n "$p" ] && ln -s "$p" "$BIN/$cmd"
 done
 
-# skfl itself is small and may be edited during a session — copy it.
-cp "$SCRIPT_DIR/skfl" "$BIN/skfl"
+# skfl: the real script uses a `uv run` shebang that won't be on PATH.
+# Store the source and create a thin wrapper that invokes python3 directly.
+cp "$SCRIPT_DIR/skfl" "$WORK/.local/skfl.py"
+cat > "$BIN/skfl" <<'WRAPPER'
+#!/bin/sh
+exec python3 "${0%/*}/../skfl.py" "$@"
+WRAPPER
 chmod +x "$BIN/skfl"
-
-# ── chown workspace to the calling user (when run via sudo) ───────────
-
-if [ -n "${SUDO_UID:-}" ] && [ -n "${SUDO_GID:-}" ]; then
-    chown -R "$SUDO_UID:$SUDO_GID" "$ROOT$REPO"
-fi
 
 # ── initialise a test repo ────────────────────────────────────────────
 
-chroot "$ROOT" /bin/sh -c \
-    "cd $REPO && PATH=$REPO/.local/bin python3 .local/bin/skfl init ."
+cd "$WORK"
+PATH="$BIN" "$BIN/skfl" init "$WORK"
 
 # ── drop into interactive shell ───────────────────────────────────────
 
 cat <<EOF
 
-  skfl dev shell (chroot)
-  repo:  $REPO
-  path:  $REPO/.local/bin
+  skfl dev shell
+  repo:  $WORK
+  path:  .local/bin
   exit:  type 'exit'
 
 EOF
 
-chroot "$ROOT" /bin/sh -c "
-    cd $REPO
-    export PATH=$REPO/.local/bin
-    export PS1='(skfl-dev) \$ '
-    exec sh -i
-"
+PATH="$BIN" HOME="$WORK" PS1='(skfl-dev) \$ ' exec "${SHELL:-sh}" --norc --noprofile
