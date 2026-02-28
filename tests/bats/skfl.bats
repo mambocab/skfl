@@ -20,14 +20,15 @@ teardown() {
     [[ "$output" == *"version = 1"* ]]
 }
 
-@test "init creates all four directories" {
+@test "init creates all five directories" {
     skfl_in_chroot init "$REPO"
-    run chroot "$CHROOT" /bin/sh -c "ls -d $REPO/10_sources $REPO/20_vetted $REPO/30_patches $REPO/40_staged"
+    run chroot "$CHROOT" /bin/sh -c "ls -d $REPO/10_sources $REPO/20_vetted $REPO/30_patches $REPO/40_staged $REPO/50_packages"
     [ "$status" -eq 0 ]
     [[ "$output" == *"10_sources"* ]]
     [[ "$output" == *"20_vetted"* ]]
     [[ "$output" == *"30_patches"* ]]
     [[ "$output" == *"40_staged"* ]]
+    [[ "$output" == *"50_packages"* ]]
 }
 
 @test "init creates .gitignore" {
@@ -610,4 +611,106 @@ teardown() {
     run skfl_in_chroot vet status
     [[ "$output" == *"a.txt"* ]]
     [[ "$output" == *"b.txt"* ]]
+}
+
+# ── package ────────────────────────────────────────────────────────────────
+
+@test "init creates 50_packages directory" {
+    skfl_in_chroot init "$REPO"
+    run chroot "$CHROOT" /bin/sh -c "test -d $REPO/50_packages"
+    [ "$status" -eq 0 ]
+}
+
+@test "package new creates directory" {
+    skfl_in_chroot init "$REPO"
+    run skfl_in_chroot package new my-setup
+    [ "$status" -eq 0 ]
+    run chroot "$CHROOT" /bin/sh -c "test -d $REPO/50_packages/my-setup"
+    [ "$status" -eq 0 ]
+}
+
+@test "package new fails on duplicate" {
+    skfl_in_chroot init "$REPO"
+    skfl_in_chroot package new my-setup
+    run skfl_in_chroot package new my-setup
+    [ "$status" -ne 0 ]
+    [[ "$output" == *"already exists"* ]]
+}
+
+@test "package add creates symlink to file" {
+    skfl_in_chroot init "$REPO"
+    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
+    skfl_in_chroot source custom test /tmp/src
+    skfl_in_chroot package new my-setup
+    run skfl_in_chroot package add my-setup custom/test/skill.md skill.md
+    [ "$status" -eq 0 ]
+    run chroot "$CHROOT" /bin/sh -c "test -L $REPO/50_packages/my-setup/skill.md"
+    [ "$status" -eq 0 ]
+}
+
+@test "package add creates symlink to directory" {
+    skfl_in_chroot init "$REPO"
+    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src/skills && echo '# Skill' > /tmp/src/skills/skill.md"
+    skfl_in_chroot source custom test /tmp/src
+    skfl_in_chroot package new my-setup
+    run skfl_in_chroot package add my-setup custom/test/skills skills
+    [ "$status" -eq 0 ]
+    run chroot "$CHROOT" /bin/sh -c "test -L $REPO/50_packages/my-setup/skills"
+    [ "$status" -eq 0 ]
+}
+
+@test "package build refuses unvetted file" {
+    skfl_in_chroot init "$REPO"
+    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
+    skfl_in_chroot source custom test /tmp/src
+    skfl_in_chroot package new my-setup
+    skfl_in_chroot package add my-setup custom/test/skill.md skill.md
+    run skfl_in_chroot package build my-setup
+    [ "$status" -ne 0 ]
+}
+
+@test "package full workflow: new -> add -> build -> install rsync" {
+    skfl_in_chroot init "$REPO"
+    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
+    skfl_in_chroot source custom test /tmp/src
+    vet_file_in_chroot custom/test/skill.md
+    skfl_in_chroot package new my-setup
+    skfl_in_chroot package add my-setup custom/test/skill.md skills/skill.md
+    run skfl_in_chroot package build my-setup
+    [ "$status" -eq 0 ]
+    # Staged file exists at correct path
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/my-setup/skills/skill.md"
+    [ "$status" -eq 0 ]
+    [[ "$output" == "# Skill" ]]
+    # Install
+    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/target"
+    run skfl_in_chroot package install rsync my-setup /tmp/target
+    [ "$status" -eq 0 ]
+    run chroot "$CHROOT" /usr/bin/cat /tmp/target/skills/skill.md
+    [ "$status" -eq 0 ]
+    [[ "$output" == "# Skill" ]]
+}
+
+@test "package build applies patches" {
+    skfl_in_chroot init "$REPO"
+    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && printf 'line1\nline2\n' > /tmp/src/file.txt"
+    skfl_in_chroot source custom test /tmp/src
+    vet_file_in_chroot custom/test/file.txt
+    chroot "$CHROOT" /bin/sh -c "
+        printf 'line1\nline2 patched\n' > /tmp/patched.txt
+        mkdir -p '$REPO/30_patches/custom/test/file.txt.d'
+        diff -u $REPO/10_sources/custom/test/file.txt /tmp/patched.txt > '$REPO/30_patches/custom/test/file.txt.d/001-fix.patch' || true
+    "
+    skfl_in_chroot package new my-setup
+    skfl_in_chroot package add my-setup custom/test/file.txt file.txt
+    run skfl_in_chroot package build my-setup
+    [ "$status" -eq 0 ]
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/my-setup/file.txt"
+    [[ "$output" == *"line2 patched"* ]]
+}
+
+@test "old install command is gone" {
+    skfl_in_chroot init "$REPO"
+    run skfl_in_chroot install rsync /tmp/x
+    [ "$status" -ne 0 ]
 }
