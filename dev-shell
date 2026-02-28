@@ -29,8 +29,8 @@ for cmd in uv python3 git diff patch less env sh \
     [ -n "$p" ] && ln -s "$p" "$BIN/$cmd"
 done
 
-# skfl: the real script uses a `uv run` shebang that won't be on PATH.
-# Store the source and create a thin wrapper that invokes it via `uv run`.
+# skfl: copy the source and create a thin wrapper that invokes it via `uv run`.
+command -v uv >/dev/null 2>&1 || { echo "error: uv is required but not found" >&2; exit 1; }
 cp "$SCRIPT_DIR/skfl" "$WORK/.local/skfl.py"
 cat > "$BIN/skfl" <<'WRAPPER'
 #!/bin/sh
