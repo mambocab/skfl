@@ -54,4 +54,9 @@ cat <<EOF
 
 EOF
 
-PATH="$BIN" HOME="$WORK" PS1='(skfl-dev) \$ ' exec "${SHELL:-sh}" --norc --noprofile
+SHELL="${SHELL:-sh}"
+case "$SHELL" in
+    */zsh)  set -- --no-rcs --no-globalrcs ;;
+    *)      set -- --norc --noprofile ;;
+esac
+PATH="$BIN" HOME="$WORK" PS1='(skfl-dev) \$ ' exec "$SHELL" "$@"
