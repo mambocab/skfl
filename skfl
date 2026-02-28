@@ -975,23 +975,29 @@ def package_install_stow(name, target):
 # ── completion ─────────────────────────────────────────────────────────
 
 @cli.command("completion")
-@click.argument("shell", required=False, type=click.Choice(["bash", "zsh", "fish"]))
+@click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
 def completion(shell):
-    """Print shell completion setup instructions.
+    """Output the shell completion script for SHELL.
 
-    SHELL may be bash, zsh, or fish. Omit to print instructions for all shells.
+    Generate the script once and save it to a file — do not eval on every
+    shell startup, as that re-invokes skfl (and uv) each time.
+
+    \b
+    bash — add to ~/.bashrc:
+      skfl completion bash > ~/.local/share/bash-completion/completions/skfl
+
+    \b
+    zsh — add directory to fpath before compinit, then run once:
+      skfl completion zsh > ~/.zfunc/_skfl
+      # ~/.zshrc: fpath=(~/.zfunc $fpath); autoload -Uz compinit && compinit
+
+    \b
+    fish — auto-loaded after running once:
+      skfl completion fish > ~/.config/fish/completions/skfl.fish
     """
-    shells = [
-        ("bash", "~/.bashrc",                           'eval "$(_SKFL_COMPLETE=bash_source skfl)"'),
-        ("zsh",  "~/.zshrc",                            'eval "$(_SKFL_COMPLETE=zsh_source skfl)"'),
-        ("fish", "~/.config/fish/completions/skfl.fish", "_SKFL_COMPLETE=fish_source skfl | source"),
-    ]
-    entries = [(name, rc, line) for name, rc, line in shells if shell in (None, name)]
-    for i, (name, rc, line) in enumerate(entries):
-        click.echo(f"# {name} — add to {rc}:")
-        click.echo(line)
-        if shell is None and i < len(entries) - 1:
-            click.echo()
+    from click.shell_completion import BashComplete, ZshComplete, FishComplete
+    cls = {"bash": BashComplete, "zsh": ZshComplete, "fish": FishComplete}[shell]
+    click.echo(cls(cli, {}, "skfl", "_SKFL_COMPLETE").source(), nl=False)
 
 
 # ── top-level shortcuts ───────────────────────────────────────────────

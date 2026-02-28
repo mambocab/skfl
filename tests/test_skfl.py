@@ -1681,48 +1681,39 @@ class TestCompletionHelpers:
 
 
 class TestCompletionCommand:
-    """Tests for 'skfl completion' setup-instructions command."""
+    """Tests for 'skfl completion' — outputs the actual completion script."""
 
-    def test_bash_output(self, tmp_dir):
+    def test_bash_outputs_script(self, tmp_dir):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["completion", "bash"])
         assert result.exit_code == 0
-        assert "_SKFL_COMPLETE=bash_source skfl" in result.output
+        # Click generates a bash function and wires it up with 'complete'
+        assert "complete" in result.output
+        assert "skfl" in result.output
 
-    def test_zsh_output(self, tmp_dir):
+    def test_zsh_outputs_script(self, tmp_dir):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["completion", "zsh"])
         assert result.exit_code == 0
-        assert "_SKFL_COMPLETE=zsh_source skfl" in result.output
+        assert "skfl" in result.output
+        assert len(result.output) > 50  # non-trivial script
 
-    def test_fish_output(self, tmp_dir):
+    def test_fish_outputs_script(self, tmp_dir):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["completion", "fish"])
         assert result.exit_code == 0
-        assert "_SKFL_COMPLETE=fish_source skfl" in result.output
+        assert "skfl" in result.output
+        assert len(result.output) > 50
 
-    def test_no_arg_prints_all_shells(self, tmp_dir):
+    def test_no_arg_fails(self, tmp_dir):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["completion"])
-        assert result.exit_code == 0
-        assert "_SKFL_COMPLETE=bash_source skfl" in result.output
-        assert "_SKFL_COMPLETE=zsh_source skfl" in result.output
-        assert "_SKFL_COMPLETE=fish_source skfl" in result.output
+        assert result.exit_code != 0
 
     def test_invalid_shell_rejected(self, tmp_dir):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["completion", "powershell"])
         assert result.exit_code != 0
-
-    def test_bash_output_contains_eval_hint(self, tmp_dir):
-        runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["completion", "bash"])
-        assert "eval" in result.output
-
-    def test_fish_output_contains_source(self, tmp_dir):
-        runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["completion", "fish"])
-        assert "source" in result.output
 
 
 # ── completion wiring (parameter introspection) ───────────────────────
