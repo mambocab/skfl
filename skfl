@@ -34,7 +34,11 @@ REPO_DIRS = [SOURCES_DIR, VETTED_DIR, PATCHES_DIR, STAGED_DIR, PACKAGES_DIR]
 # ── helpers ────────────────────────────────────────────────────────────
 
 def find_repo(start: Path | None = None) -> Path:
-    """Walk up from start (default: cwd) to find a directory containing skfl.toml."""
+    """Walk up from start (default: cwd) to find a directory containing skfl.toml.
+
+    Falls back to the $SKFL_REPO environment variable when cwd is not inside
+    any skfl repository, so commands and completions work from any directory.
+    """
     p = (start or Path.cwd()).resolve()
     while True:
         if (p / SKFL_TOML).is_file():
@@ -43,8 +47,13 @@ def find_repo(start: Path | None = None) -> Path:
         if parent == p:
             break
         p = parent
+    if env_repo := os.environ.get("SKFL_REPO"):
+        candidate = Path(env_repo).expanduser().resolve()
+        if (candidate / SKFL_TOML).is_file():
+            return candidate
     raise click.ClickException(
-        "Not inside an skfl repository (no skfl.toml found). Run 'skfl init' to create one."
+        "Not inside an skfl repository (no skfl.toml found). "
+        "Run 'skfl init' to create one, or set $SKFL_REPO."
     )
 
 
@@ -994,6 +1003,11 @@ def completion(shell):
     \b
     fish — auto-loaded after running once:
       skfl completion fish > ~/.config/fish/completions/skfl.fish
+
+    \b
+    For completions to work from any directory, set $SKFL_REPO in the same
+    shell profile file, pointing at your skfl repository:
+      export SKFL_REPO=~/path/to/your/skfl-repo
     """
     from click.shell_completion import BashComplete, ZshComplete, FishComplete
     cls = {"bash": BashComplete, "zsh": ZshComplete, "fish": FishComplete}[shell]

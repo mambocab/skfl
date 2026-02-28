@@ -84,6 +84,32 @@ class TestFindRepo:
         with pytest.raises(Exception, match="Not inside an skfl repository"):
             skfl.find_repo(tmp_dir)
 
+    def test_skfl_repo_env_var_used_as_fallback(self, repo, tmp_dir):
+        # cwd is tmp_dir (not inside any repo), but $SKFL_REPO points at repo
+        with mock_patch.dict(os.environ, {"SKFL_REPO": str(repo)}):
+            assert skfl.find_repo(tmp_dir) == repo
+
+    def test_skfl_repo_env_var_ignored_when_local_repo_found(self, repo, tmp_path):
+        other_repo = tmp_path / "other"
+        other_repo.mkdir()
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["init", str(other_repo)])
+        # $SKFL_REPO points elsewhere, but cwd is inside repo — use repo
+        with mock_patch.dict(os.environ, {"SKFL_REPO": str(other_repo)}):
+            assert skfl.find_repo(repo) == repo
+
+    def test_skfl_repo_env_var_invalid_path_still_raises(self, tmp_dir):
+        with mock_patch.dict(os.environ, {"SKFL_REPO": "/nonexistent/path"}):
+            with pytest.raises(Exception, match="Not inside an skfl repository"):
+                skfl.find_repo(tmp_dir)
+
+    def test_completion_works_via_skfl_repo(self, repo_with_source, tmp_dir):
+        # Completions from a directory outside the repo work when $SKFL_REPO is set
+        with mock_patch.dict(os.environ, {"SKFL_REPO": str(repo_with_source)}):
+            results = skfl._complete_source_files(None, None, "")
+        values = {r.value for r in results}
+        assert "custom/test-src/hello.md" in values
+
 
 # ── init ───────────────────────────────────────────────────────────────
 
