@@ -186,6 +186,45 @@ def expand_paths(repo: Path, fpaths: list[str]) -> list[str]:
     return result
 
 
+def vet_single_file(repo: Path, rel: Path) -> bool:
+    """Interactively vet a single source file.
+
+    Returns True if the file is (or becomes) vetted, False if skipped.
+    """
+    sources = repo / SOURCES_DIR
+    source_path = sources / rel
+
+    if not source_path.is_file():
+        raise click.ClickException(f"Source file not found: {source_path}")
+
+    status = vet_status_for_file(repo, rel)
+
+    if status == "vetted":
+        click.echo(f"  {rel}: already vetted (unchanged)")
+        return True
+
+    pager = "less"
+    if str(rel).endswith(".md") and shutil.which("glow"):
+        pager = "glow"
+
+    if status == "modified":
+        click.echo(f"  {rel}: source has changed since last vet. Opening in pager for review...")
+        subprocess.run([pager, str(source_path)])
+        if not click.confirm(f"  Approve changes to {rel}?"):
+            click.echo(f"  Skipping {rel}.")
+            return False
+    else:
+        click.echo(f"  {rel}: unvetted. Opening in pager...")
+        subprocess.run([pager, str(source_path)])
+        if not click.confirm(f"  Mark {rel} as vetted?"):
+            click.echo(f"  Skipping {rel}.")
+            return False
+
+    write_vetted_hash(repo, rel, file_hash(source_path))
+    click.echo(f"  {rel}: vetted.")
+    return True
+
+
 def do_vet_files(repo: Path, files: list[str]) -> None:
     """Vet the given source files."""
     files = expand_paths(repo, files)
@@ -197,36 +236,7 @@ def do_vet_files(repo: Path, files: list[str]) -> None:
             raise click.ClickException(
                 f"File {fpath} is not inside the sources directory ({sources})."
             )
-
-        source_path = sources / rel
-        if not source_path.is_file():
-            raise click.ClickException(f"Source file not found: {source_path}")
-
-        status = vet_status_for_file(repo, rel)
-
-        if status == "vetted":
-            click.echo(f"  {rel}: already vetted (unchanged)")
-            continue
-
-        pager = "less"
-        if str(rel).endswith(".md") and shutil.which("glow"):
-            pager = "glow"
-
-        if status == "modified":
-            click.echo(f"  {rel}: source has changed since last vet. Opening in pager for review...")
-            subprocess.run([pager, str(source_path)])
-            if not click.confirm(f"  Approve changes to {rel}?"):
-                click.echo(f"  Skipping {rel}.")
-                continue
-        else:
-            click.echo(f"  {rel}: unvetted. Opening in pager...")
-            subprocess.run([pager, str(source_path)])
-            if not click.confirm(f"  Mark {rel} as vetted?"):
-                click.echo(f"  Skipping {rel}.")
-                continue
-
-        write_vetted_hash(repo, rel, file_hash(source_path))
-        click.echo(f"  {rel}: vetted.")
+        vet_single_file(repo, rel)
 
 
 def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> None:
@@ -246,15 +256,9 @@ def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> 
             raise click.ClickException(f"Source file not found: {source_path}")
 
         status = vet_status_for_file(repo, rel)
-        if status == "unvetted":
-            raise click.ClickException(
-                f"File {rel} has not been vetted. Run 'skfl vet {rel}' first."
-            )
-        if status == "modified":
-            raise click.ClickException(
-                f"File {rel} has been modified since last vet. "
-                f"Run 'skfl vet {rel}' to review changes."
-            )
+        if status in ("unvetted", "modified"):
+            if not vet_single_file(repo, rel):
+                continue
 
         content = source_path.read_bytes()
 

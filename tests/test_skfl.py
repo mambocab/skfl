@@ -615,24 +615,61 @@ class TestStageCommand:
         assert staged.exists()
         assert staged.read_text() == "# Hello\n\nWorld\n"
 
-    def test_stage_unvetted_fails(self, repo_with_source):
+    def test_stage_unvetted_prompts_and_stages_on_approve(self, repo_with_source):
         runner = CliRunner()
-        result = runner.invoke(
-            skfl.cli, ["stage", "custom/test-src/hello.md"]
-        )
-        assert result.exit_code != 0
-        assert "not been vetted" in result.output
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli, ["stage", "custom/test-src/hello.md"], input="y\n"
+            )
+        assert result.exit_code == 0
+        assert "unvetted" in result.output
+        assert "staged:" in result.output
 
-    def test_stage_modified_fails(self, repo_with_vetted):
+        staged = repo_with_source / skfl.STAGED_DIR / "custom/test-src/hello.md"
+        assert staged.exists()
+
+    def test_stage_unvetted_skips_on_reject(self, repo_with_source):
+        runner = CliRunner()
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli, ["stage", "custom/test-src/hello.md"], input="n\n"
+            )
+        assert result.exit_code == 0
+        assert "Skipping" in result.output
+
+        staged = repo_with_source / skfl.STAGED_DIR / "custom/test-src/hello.md"
+        assert not staged.exists()
+
+    def test_stage_modified_prompts_and_stages_on_approve(self, repo_with_vetted):
         source = repo_with_vetted / skfl.SOURCES_DIR / "custom/test-src/hello.md"
         source.write_text("# Changed\n")
 
         runner = CliRunner()
-        result = runner.invoke(
-            skfl.cli, ["stage", "custom/test-src/hello.md"]
-        )
-        assert result.exit_code != 0
-        assert "modified" in result.output
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli, ["stage", "custom/test-src/hello.md"], input="y\n"
+            )
+        assert result.exit_code == 0
+        assert "changed since last vet" in result.output
+        assert "staged:" in result.output
+
+        staged = repo_with_vetted / skfl.STAGED_DIR / "custom/test-src/hello.md"
+        assert staged.read_text() == "# Changed\n"
+
+    def test_stage_modified_skips_on_reject(self, repo_with_vetted):
+        source = repo_with_vetted / skfl.SOURCES_DIR / "custom/test-src/hello.md"
+        source.write_text("# Changed\n")
+
+        runner = CliRunner()
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli, ["stage", "custom/test-src/hello.md"], input="n\n"
+            )
+        assert result.exit_code == 0
+        assert "Skipping" in result.output
+
+        staged = repo_with_vetted / skfl.STAGED_DIR / "custom/test-src/hello.md"
+        assert not staged.exists()
 
     def test_stage_with_patches(self, repo_with_vetted, tmp_path):
         repo = repo_with_vetted
@@ -884,7 +921,7 @@ class TestFullWorkflow:
         assert staged.read_bytes() == modified
 
     def test_source_update_re_vet(self, repo_with_vetted):
-        """Test that modifying source makes file require re-vetting."""
+        """Test that modifying source triggers inline re-vetting during stage."""
         repo = repo_with_vetted
         runner = CliRunner()
         rel = Path("custom/test-src/hello.md")
@@ -897,21 +934,17 @@ class TestFullWorkflow:
         result = runner.invoke(skfl.cli, ["vet", "status"])
         assert "modified" in result.output
 
-        # Staging should fail
-        result = runner.invoke(skfl.cli, ["stage", "custom/test-src/hello.md"])
-        assert result.exit_code != 0
-        assert "modified" in result.output
-
-        # Re-vet (approve changes)
+        # Staging should prompt for re-vetting, then stage on approval
         with mock_patch("subprocess.run"):
             result = runner.invoke(
-                skfl.cli, ["vet", "custom/test-src/hello.md"], input="y\n"
+                skfl.cli, ["stage", "custom/test-src/hello.md"], input="y\n"
             )
         assert result.exit_code == 0
+        assert "changed since last vet" in result.output
+        assert "staged:" in result.output
 
-        # Now staging should work
-        result = runner.invoke(skfl.cli, ["stage", "custom/test-src/hello.md"])
-        assert result.exit_code == 0
+        staged = repo / skfl.STAGED_DIR / rel
+        assert staged.read_text() == "# Hello Updated\n\nNew content\n"
 
 
 # ── profile-based staging ─────────────────────────────────────────────
