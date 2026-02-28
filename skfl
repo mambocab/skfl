@@ -78,15 +78,29 @@ def file_hash(path: Path) -> str:
 
 
 def patches_dir_for(repo: Path, rel: Path) -> Path:
-    """Return the patches .d directory for a given source-relative path."""
+    """Return the default patches .d directory for a given source-relative path."""
     return Path(str(repo / PATCHES_DIR / rel) + ".d")
 
 
-def list_patches_for(repo: Path, rel: Path) -> list[Path]:
+def profile_patches_dir_for(repo: Path, profile: str, rel: Path) -> Path:
+    """Return the profile-specific patches .d directory."""
+    return Path(str(repo / PATCHES_DIR / "_profiles" / profile / rel) + ".d")
+
+
+def list_patches_for(repo: Path, rel: Path, profile: str | None = None) -> list[Path]:
+    """List patches for a file. Default patches are always included.
+    If a profile is given, profile-specific patches are appended after defaults."""
+    patches = []
+    # Default patches (always applied)
     d = patches_dir_for(repo, rel)
-    if not d.is_dir():
-        return []
-    return sorted(p for p in d.iterdir() if p.suffix == ".patch")
+    if d.is_dir():
+        patches.extend(sorted(p for p in d.iterdir() if p.suffix == ".patch"))
+    # Profile-specific patches (applied on top of defaults)
+    if profile:
+        pd = profile_patches_dir_for(repo, profile, rel)
+        if pd.is_dir():
+            patches.extend(sorted(p for p in pd.iterdir() if p.suffix == ".patch"))
+    return patches
 
 
 def apply_patches(source_content: bytes, patches: list[Path]) -> bytes:
@@ -180,8 +194,8 @@ def do_vet_files(repo: Path, files: list[str]) -> None:
         click.echo(f"  {rel}: vetted.")
 
 
-def do_stage_files(repo: Path, files: list[str]) -> None:
-    """Stage the given source files."""
+def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> None:
+    """Stage the given source files, optionally under a named profile."""
     sources = repo / SOURCES_DIR
     for fpath in files:
         try:
@@ -209,11 +223,14 @@ def do_stage_files(repo: Path, files: list[str]) -> None:
         vetted_path = repo / VETTED_DIR / rel
         content = vetted_path.read_bytes()
 
-        patches = list_patches_for(repo, rel)
+        patches = list_patches_for(repo, rel, profile=profile)
         if patches:
             content = apply_patches(content, patches)
 
-        staged_path = repo / STAGED_DIR / rel
+        if profile:
+            staged_path = repo / STAGED_DIR / profile / rel
+        else:
+            staged_path = repo / STAGED_DIR / rel
         staged_path.parent.mkdir(parents=True, exist_ok=True)
         staged_path.write_bytes(content)
         if os.access(source_path, os.X_OK):
@@ -225,7 +242,8 @@ def do_stage_files(repo: Path, files: list[str]) -> None:
             if patches
             else ""
         )
-        click.echo(f"  staged: {rel}{patch_note}")
+        profile_note = f" [profile: {profile}]" if profile else ""
+        click.echo(f"  staged: {rel}{patch_note}{profile_note}")
 
 
 # ── custom group for vet/stage that routes unknown args to a default command ──
@@ -629,18 +647,23 @@ def stage(ctx):
 
 
 @stage.command("_default", hidden=True)
+@click.option("--as", "profile", default=None, help="Stage under a named profile for variant installations.")
 @click.argument("files", nargs=-1, required=True, type=click.Path())
-def stage_default(files):
+def stage_default(profile, files):
     """Stage the specified source files."""
     r = find_repo()
-    do_stage_files(r, list(files))
+    do_stage_files(r, list(files), profile=profile)
 
 
 @stage.command("list")
-def stage_list():
+@click.option("--as", "profile", default=None, help="List files staged under a named profile.")
+def stage_list(profile):
     """Show currently staged files."""
     r = find_repo()
-    staged = r / STAGED_DIR
+    if profile:
+        staged = r / STAGED_DIR / profile
+    else:
+        staged = r / STAGED_DIR
     if not staged.is_dir():
         click.echo("No staged files.")
         return

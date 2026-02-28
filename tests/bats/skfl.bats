@@ -452,6 +452,162 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
+# ── profile-based staging (multiple installed versions) ─────────────
+
+@test "single source, multiple profiles with different patches" {
+    skfl_in_chroot init "$REPO"
+
+    # Create a source with three files
+    chroot "$CHROOT" /bin/sh -c "
+        mkdir -p /tmp/src/skills
+        printf 'greeting: hello\ntarget: world\nmode: default\n' > /tmp/src/skills/config.txt
+        printf 'step1: fetch\nstep2: process\nstep3: output\n' > /tmp/src/skills/pipeline.txt
+        printf '# Docs\nGeneric documentation.\n' > /tmp/src/skills/readme.md
+    "
+    skfl_in_chroot source custom acme /tmp/src
+
+    # Vet all files
+    chroot "$CHROOT" /bin/sh -c "
+        mkdir -p $REPO/20_vetted/custom/acme/skills
+        cp $REPO/10_sources/custom/acme/skills/config.txt   $REPO/20_vetted/custom/acme/skills/config.txt
+        cp $REPO/10_sources/custom/acme/skills/pipeline.txt $REPO/20_vetted/custom/acme/skills/pipeline.txt
+        cp $REPO/10_sources/custom/acme/skills/readme.md    $REPO/20_vetted/custom/acme/skills/readme.md
+    "
+
+    # --- Default patches (shared across all profiles) ---
+    # Default patch on config.txt: change greeting from hello to hi
+    chroot "$CHROOT" /bin/sh -c "
+        printf 'greeting: hi\ntarget: world\nmode: default\n' > /tmp/config-default.txt
+        mkdir -p '$REPO/30_patches/custom/acme/skills/config.txt.d'
+        diff -u $REPO/20_vetted/custom/acme/skills/config.txt /tmp/config-default.txt \
+            > '$REPO/30_patches/custom/acme/skills/config.txt.d/001-short-greeting.patch' || true
+    "
+
+    # --- Profile 'claude' patches ---
+    # claude: config.txt gets target changed to 'claude-user' (on top of default hi)
+    chroot "$CHROOT" /bin/sh -c "
+        printf 'greeting: hi\ntarget: claude-user\nmode: default\n' > /tmp/config-claude.txt
+        printf 'greeting: hi\ntarget: world\nmode: default\n' > /tmp/config-base.txt
+        mkdir -p '$REPO/30_patches/_profiles/claude/custom/acme/skills/config.txt.d'
+        diff -u /tmp/config-base.txt /tmp/config-claude.txt \
+            > '$REPO/30_patches/_profiles/claude/custom/acme/skills/config.txt.d/001-claude-target.patch' || true
+    "
+    # claude: pipeline.txt gets step2 changed to 'analyze'
+    chroot "$CHROOT" /bin/sh -c "
+        printf 'step1: fetch\nstep2: analyze\nstep3: output\n' > /tmp/pipeline-claude.txt
+        mkdir -p '$REPO/30_patches/_profiles/claude/custom/acme/skills/pipeline.txt.d'
+        diff -u $REPO/20_vetted/custom/acme/skills/pipeline.txt /tmp/pipeline-claude.txt \
+            > '$REPO/30_patches/_profiles/claude/custom/acme/skills/pipeline.txt.d/001-claude-analyze.patch' || true
+    "
+
+    # --- Profile 'kiro' patches ---
+    # kiro: config.txt gets mode changed to 'kiro-power' (on top of default hi)
+    chroot "$CHROOT" /bin/sh -c "
+        printf 'greeting: hi\ntarget: world\nmode: kiro-power\n' > /tmp/config-kiro.txt
+        printf 'greeting: hi\ntarget: world\nmode: default\n' > /tmp/config-base2.txt
+        mkdir -p '$REPO/30_patches/_profiles/kiro/custom/acme/skills/config.txt.d'
+        diff -u /tmp/config-base2.txt /tmp/config-kiro.txt \
+            > '$REPO/30_patches/_profiles/kiro/custom/acme/skills/config.txt.d/001-kiro-mode.patch' || true
+    "
+    # kiro: pipeline.txt gets TWO patches (step1 and step3)
+    chroot "$CHROOT" /bin/sh -c "
+        printf 'step1: download\nstep2: process\nstep3: output\n' > /tmp/pipeline-kiro1.txt
+        mkdir -p '$REPO/30_patches/_profiles/kiro/custom/acme/skills/pipeline.txt.d'
+        diff -u $REPO/20_vetted/custom/acme/skills/pipeline.txt /tmp/pipeline-kiro1.txt \
+            > '$REPO/30_patches/_profiles/kiro/custom/acme/skills/pipeline.txt.d/001-kiro-download.patch' || true
+    "
+    chroot "$CHROOT" /bin/sh -c "
+        printf 'step1: download\nstep2: process\nstep3: publish\n' > /tmp/pipeline-kiro2.txt
+        printf 'step1: download\nstep2: process\nstep3: output\n' > /tmp/pipeline-kiro2-base.txt
+        diff -u /tmp/pipeline-kiro2-base.txt /tmp/pipeline-kiro2.txt \
+            > '$REPO/30_patches/_profiles/kiro/custom/acme/skills/pipeline.txt.d/002-kiro-publish.patch' || true
+    "
+
+    # --- Stage all three files under both profiles ---
+    run skfl_in_chroot stage --as claude custom/acme/skills/config.txt custom/acme/skills/pipeline.txt custom/acme/skills/readme.md
+    [ "$status" -eq 0 ]
+
+    run skfl_in_chroot stage --as kiro custom/acme/skills/config.txt custom/acme/skills/pipeline.txt custom/acme/skills/readme.md
+    [ "$status" -eq 0 ]
+
+    # Also stage the default (no profile) version
+    run skfl_in_chroot stage custom/acme/skills/config.txt custom/acme/skills/pipeline.txt custom/acme/skills/readme.md
+    [ "$status" -eq 0 ]
+
+    # --- Verify default staging ---
+    # config.txt: only default patch (greeting: hi), rest unchanged
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/custom/acme/skills/config.txt"
+    [[ "$output" == *"greeting: hi"* ]]
+    [[ "$output" == *"target: world"* ]]
+    [[ "$output" == *"mode: default"* ]]
+    # pipeline.txt: no default patches, should be unchanged
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/custom/acme/skills/pipeline.txt"
+    [[ "$output" == *"step2: process"* ]]
+    # readme.md: no patches at all, should be unchanged
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/custom/acme/skills/readme.md"
+    [[ "$output" == *"Generic documentation"* ]]
+
+    # --- Verify claude staging ---
+    # config.txt: default patch (hi) + claude patch (claude-user)
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/claude/custom/acme/skills/config.txt"
+    [[ "$output" == *"greeting: hi"* ]]
+    [[ "$output" == *"target: claude-user"* ]]
+    [[ "$output" == *"mode: default"* ]]
+    # pipeline.txt: claude patch (analyze)
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/claude/custom/acme/skills/pipeline.txt"
+    [[ "$output" == *"step2: analyze"* ]]
+    [[ "$output" == *"step1: fetch"* ]]
+    # readme.md: no claude-specific patches, unchanged
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/claude/custom/acme/skills/readme.md"
+    [[ "$output" == *"Generic documentation"* ]]
+
+    # --- Verify kiro staging ---
+    # config.txt: default patch (hi) + kiro patch (kiro-power)
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/kiro/custom/acme/skills/config.txt"
+    [[ "$output" == *"greeting: hi"* ]]
+    [[ "$output" == *"target: world"* ]]
+    [[ "$output" == *"mode: kiro-power"* ]]
+    # pipeline.txt: TWO kiro patches (download + publish)
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/kiro/custom/acme/skills/pipeline.txt"
+    [[ "$output" == *"step1: download"* ]]
+    [[ "$output" == *"step2: process"* ]]
+    [[ "$output" == *"step3: publish"* ]]
+    # readme.md: no kiro-specific patches, unchanged
+    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/kiro/custom/acme/skills/readme.md"
+    [[ "$output" == *"Generic documentation"* ]]
+
+    # --- Verify all three versions coexist ---
+    run chroot "$CHROOT" /bin/sh -c "ls $REPO/40_staged/custom/acme/skills/config.txt $REPO/40_staged/claude/custom/acme/skills/config.txt $REPO/40_staged/kiro/custom/acme/skills/config.txt"
+    [ "$status" -eq 0 ]
+
+    # --- Verify the three config.txt files are all different ---
+    run chroot "$CHROOT" /usr/bin/diff "$REPO/40_staged/claude/custom/acme/skills/config.txt" "$REPO/40_staged/kiro/custom/acme/skills/config.txt"
+    [ "$status" -ne 0 ]
+    run chroot "$CHROOT" /usr/bin/diff "$REPO/40_staged/custom/acme/skills/config.txt" "$REPO/40_staged/claude/custom/acme/skills/config.txt"
+    [ "$status" -ne 0 ]
+    run chroot "$CHROOT" /usr/bin/diff "$REPO/40_staged/custom/acme/skills/config.txt" "$REPO/40_staged/kiro/custom/acme/skills/config.txt"
+    [ "$status" -ne 0 ]
+}
+
+@test "stage list --as shows only that profile" {
+    skfl_in_chroot init "$REPO"
+    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'content' > /tmp/src/file.txt"
+    skfl_in_chroot source custom test /tmp/src
+    chroot "$CHROOT" /bin/sh -c "mkdir -p $REPO/20_vetted/custom/test && cp $REPO/10_sources/custom/test/file.txt $REPO/20_vetted/custom/test/file.txt"
+    # Stage to two profiles and default
+    skfl_in_chroot stage custom/test/file.txt
+    skfl_in_chroot stage --as alpha custom/test/file.txt
+    skfl_in_chroot stage --as beta custom/test/file.txt
+    # Full list shows all (including profile subdirs)
+    run skfl_in_chroot stage list
+    [[ "$output" == *"alpha"* ]]
+    [[ "$output" == *"beta"* ]]
+    # Profile list shows only that profile's files
+    run skfl_in_chroot stage list --as alpha
+    [[ "$output" == *"file.txt"* ]]
+    [[ "$output" != *"beta"* ]]
+}
+
 @test "multiple sources can coexist" {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src1 && echo 'from source 1' > /tmp/src1/a.txt"

@@ -816,3 +816,217 @@ class TestFullWorkflow:
         # Now staging should work
         result = runner.invoke(skfl.cli, ["stage", "custom/test-src/hello.md"])
         assert result.exit_code == 0
+
+
+# ── profile-based staging ─────────────────────────────────────────────
+
+
+def _make_patch(tmp_path, original: bytes, modified: bytes, name: str = "patch") -> bytes:
+    """Helper: generate a unified diff patch from original to modified."""
+    orig_f = tmp_path / f"{name}.orig"
+    new_f = tmp_path / f"{name}.new"
+    orig_f.write_bytes(original)
+    new_f.write_bytes(modified)
+    proc = subprocess.run(
+        ["diff", "-u", str(orig_f), str(new_f)], capture_output=True
+    )
+    return proc.stdout
+
+
+class TestProfilePatchesDirFor:
+    def test_returns_profile_d_directory(self, repo):
+        rel = Path("custom/test-src/hello.md")
+        d = skfl.profile_patches_dir_for(repo, "claude", rel)
+        assert "_profiles/claude" in str(d)
+        assert str(d).endswith("hello.md.d")
+
+
+class TestListPatchesWithProfile:
+    def test_no_profile_returns_default_only(self, repo):
+        rel = Path("custom/test-src/hello.md")
+        d = skfl.patches_dir_for(repo, rel)
+        d.mkdir(parents=True)
+        (d / "001-default.patch").write_text("default patch")
+
+        patches = skfl.list_patches_for(repo, rel)
+        assert len(patches) == 1
+        assert patches[0].name == "001-default.patch"
+
+    def test_profile_includes_default_and_profile(self, repo):
+        rel = Path("custom/test-src/hello.md")
+        # Default patch
+        d = skfl.patches_dir_for(repo, rel)
+        d.mkdir(parents=True)
+        (d / "001-default.patch").write_text("default")
+        # Profile patch
+        pd = skfl.profile_patches_dir_for(repo, "claude", rel)
+        pd.mkdir(parents=True)
+        (pd / "001-claude.patch").write_text("claude")
+
+        patches = skfl.list_patches_for(repo, rel, profile="claude")
+        assert len(patches) == 2
+        names = [p.name for p in patches]
+        assert "001-default.patch" in names
+        assert "001-claude.patch" in names
+        # Default patches come first
+        assert patches[0].name == "001-default.patch"
+
+    def test_profile_only_no_defaults(self, repo):
+        rel = Path("custom/test-src/hello.md")
+        pd = skfl.profile_patches_dir_for(repo, "kiro", rel)
+        pd.mkdir(parents=True)
+        (pd / "001-kiro.patch").write_text("kiro")
+
+        patches = skfl.list_patches_for(repo, rel, profile="kiro")
+        assert len(patches) == 1
+        assert patches[0].name == "001-kiro.patch"
+
+    def test_no_profile_ignores_profile_patches(self, repo):
+        rel = Path("custom/test-src/hello.md")
+        pd = skfl.profile_patches_dir_for(repo, "claude", rel)
+        pd.mkdir(parents=True)
+        (pd / "001-claude.patch").write_text("claude only")
+
+        patches = skfl.list_patches_for(repo, rel)
+        assert len(patches) == 0
+
+
+class TestStageWithProfile:
+    def test_stage_as_profile(self, repo_with_vetted):
+        runner = CliRunner()
+        result = runner.invoke(
+            skfl.cli, ["stage", "--as", "claude", "custom/test-src/hello.md"]
+        )
+        assert result.exit_code == 0
+        assert "profile: claude" in result.output
+
+        staged = repo_with_vetted / skfl.STAGED_DIR / "claude/custom/test-src/hello.md"
+        assert staged.exists()
+        assert staged.read_text() == "# Hello\n\nWorld\n"
+
+    def test_stage_two_profiles_coexist(self, repo_with_vetted):
+        runner = CliRunner()
+        runner.invoke(
+            skfl.cli, ["stage", "--as", "alpha", "custom/test-src/hello.md"]
+        )
+        runner.invoke(
+            skfl.cli, ["stage", "--as", "beta", "custom/test-src/hello.md"]
+        )
+        runner.invoke(
+            skfl.cli, ["stage", "custom/test-src/hello.md"]
+        )
+
+        repo = repo_with_vetted
+        assert (repo / skfl.STAGED_DIR / "alpha/custom/test-src/hello.md").exists()
+        assert (repo / skfl.STAGED_DIR / "beta/custom/test-src/hello.md").exists()
+        assert (repo / skfl.STAGED_DIR / "custom/test-src/hello.md").exists()
+
+    def test_stage_profiles_apply_different_patches(self, repo_with_vetted, tmp_path):
+        repo = repo_with_vetted
+        rel = Path("custom/test-src/hello.md")
+        original = (repo / skfl.VETTED_DIR / rel).read_bytes()
+        runner = CliRunner()
+
+        # Default patch: World -> Earth
+        default_patch = _make_patch(
+            tmp_path, original, original.replace(b"World", b"Earth"), "default"
+        )
+        d = skfl.patches_dir_for(repo, rel)
+        d.mkdir(parents=True)
+        (d / "001-earth.patch").write_bytes(default_patch)
+
+        # Profile 'claude' patch: Earth -> Claude-Earth (on top of default)
+        after_default = original.replace(b"World", b"Earth")
+        claude_patch = _make_patch(
+            tmp_path, after_default, after_default.replace(b"Earth", b"Claude-Earth"), "claude"
+        )
+        pd_claude = skfl.profile_patches_dir_for(repo, "claude", rel)
+        pd_claude.mkdir(parents=True)
+        (pd_claude / "001-claude.patch").write_bytes(claude_patch)
+
+        # Profile 'kiro' patch: Earth -> Kiro-Earth (on top of default)
+        kiro_patch = _make_patch(
+            tmp_path, after_default, after_default.replace(b"Earth", b"Kiro-Earth"), "kiro"
+        )
+        pd_kiro = skfl.profile_patches_dir_for(repo, "kiro", rel)
+        pd_kiro.mkdir(parents=True)
+        (pd_kiro / "001-kiro.patch").write_bytes(kiro_patch)
+
+        # Stage all three
+        result = runner.invoke(skfl.cli, ["stage", "custom/test-src/hello.md"])
+        assert result.exit_code == 0
+        result = runner.invoke(
+            skfl.cli, ["stage", "--as", "claude", "custom/test-src/hello.md"]
+        )
+        assert result.exit_code == 0
+        result = runner.invoke(
+            skfl.cli, ["stage", "--as", "kiro", "custom/test-src/hello.md"]
+        )
+        assert result.exit_code == 0
+
+        # Verify: default has Earth, claude has Claude-Earth, kiro has Kiro-Earth
+        default_staged = (repo / skfl.STAGED_DIR / rel).read_bytes()
+        claude_staged = (repo / skfl.STAGED_DIR / "claude" / rel).read_bytes()
+        kiro_staged = (repo / skfl.STAGED_DIR / "kiro" / rel).read_bytes()
+
+        assert b"Earth" in default_staged
+        assert b"Claude-Earth" not in default_staged
+        assert b"Claude-Earth" in claude_staged
+        assert b"Kiro-Earth" in kiro_staged
+
+        # All three are different
+        assert default_staged != claude_staged
+        assert default_staged != kiro_staged
+        assert claude_staged != kiro_staged
+
+    def test_stage_list_with_profile(self, repo_with_vetted):
+        runner = CliRunner()
+        runner.invoke(
+            skfl.cli, ["stage", "--as", "myprofile", "custom/test-src/hello.md"]
+        )
+        result = runner.invoke(skfl.cli, ["stage", "list", "--as", "myprofile"])
+        assert result.exit_code == 0
+        assert "hello.md" in result.output
+
+    def test_stage_profile_multiple_files_different_patches(
+        self, repo_with_vetted, tmp_path
+    ):
+        """Test staging multiple files where each has different profile patches."""
+        repo = repo_with_vetted
+        runner = CliRunner()
+
+        rel_md = Path("custom/test-src/hello.md")
+        rel_py = Path("custom/test-src/script.py")
+        original_md = (repo / skfl.VETTED_DIR / rel_md).read_bytes()
+        original_py = (repo / skfl.VETTED_DIR / rel_py).read_bytes()
+
+        # Profile patch for hello.md only
+        md_patch = _make_patch(
+            tmp_path, original_md, original_md.replace(b"World", b"Profiled"), "md"
+        )
+        pd_md = skfl.profile_patches_dir_for(repo, "test-profile", rel_md)
+        pd_md.mkdir(parents=True)
+        (pd_md / "001-profiled.patch").write_bytes(md_patch)
+
+        # Profile patch for script.py only
+        py_patch = _make_patch(
+            tmp_path, original_py, b"print('profiled')\n", "py"
+        )
+        pd_py = skfl.profile_patches_dir_for(repo, "test-profile", rel_py)
+        pd_py.mkdir(parents=True)
+        (pd_py / "001-profiled.patch").write_bytes(py_patch)
+
+        # Stage both files under the profile
+        result = runner.invoke(
+            skfl.cli,
+            ["stage", "--as", "test-profile",
+             "custom/test-src/hello.md", "custom/test-src/script.py"],
+        )
+        assert result.exit_code == 0
+        assert result.output.count("staged:") == 2
+
+        # Verify each file got its own profile patch
+        staged_md = (repo / skfl.STAGED_DIR / "test-profile" / rel_md).read_bytes()
+        staged_py = (repo / skfl.STAGED_DIR / "test-profile" / rel_py).read_bytes()
+        assert b"Profiled" in staged_md
+        assert b"profiled" in staged_py
