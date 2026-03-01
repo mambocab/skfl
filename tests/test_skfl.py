@@ -588,7 +588,7 @@ class TestPatchCreate:
         runner = CliRunner()
         # Create a shell script that acts as an editor
         editor_script = tmp_path / "editor.sh"
-        editor_script.write_text("#!/bin/sh\nsed -i 's/World/Universe/' \"$1\"\n")
+        editor_script.write_text("#!/bin/sh\nsed -i '' 's/World/Universe/' \"$1\"\n")
         editor_script.chmod(0o755)
 
         with mock_patch.dict(os.environ, {"EDITOR": str(editor_script)}):
