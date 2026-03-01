@@ -61,6 +61,28 @@ chmod +x "$BIN/skfl"
 cd "$WORK"
 PATH="$BIN" HOME="$WORK" "$BIN/skfl" init "$WORK/.skfl"
 
+# ── shell completion ──────────────────────────────────────────────────
+
+SHELL="${SHELL:-sh}"
+case "$SHELL" in
+    */zsh)
+        mkdir -p "$WORK/.zfunc"
+        PATH="$BIN" HOME="$WORK" "$BIN/skfl" completion zsh > "$WORK/.zfunc/_skfl"
+        cat > "$WORK/.zshrc" <<ZSHRC
+fpath=($WORK/.zfunc \$fpath)
+autoload -Uz compinit && compinit
+PS1='(skfl-dev) \$ '
+ZSHRC
+        ;;
+    */bash)
+        PATH="$BIN" HOME="$WORK" "$BIN/skfl" completion bash > "$WORK/.bash_completion"
+        cat > "$WORK/.bashrc" <<BASHRC
+source "$WORK/.bash_completion"
+PS1='(skfl-dev) \$ '
+BASHRC
+        ;;
+esac
+
 # ── drop into interactive shell ───────────────────────────────────────
 
 cat <<EOF
@@ -72,9 +94,8 @@ cat <<EOF
 
 EOF
 
-SHELL="${SHELL:-sh}"
 case "$SHELL" in
-    */zsh)  set -- --no-rcs --no-globalrcs ;;
-    *)      set -- --norc --noprofile ;;
+    */zsh)  ZDOTDIR="$WORK" PATH="$BIN" HOME="$WORK" exec "$SHELL" ;;
+    */bash) PATH="$BIN" HOME="$WORK" exec "$SHELL" --init-file "$WORK/.bashrc" ;;
+    *)      PATH="$BIN" HOME="$WORK" PS1='(skfl-dev) $ ' exec "$SHELL" --norc --noprofile ;;
 esac
-PATH="$BIN" HOME="$WORK" PS1='(skfl-dev) $ ' exec "$SHELL" "$@"
