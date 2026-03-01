@@ -54,14 +54,14 @@ chmod +x "$BIN/skfl"
 # ── initialise a test repo ────────────────────────────────────────────
 
 cd "$WORK"
-PATH="$BIN" "$BIN/skfl" init "$WORK"
+PATH="$BIN" HOME="$WORK" "$BIN/skfl" init "$WORK/.skfl"
 
 # ── drop into interactive shell ───────────────────────────────────────
 
 cat <<EOF
 
   skfl dev shell
-  repo:  $WORK
+  repo:  $WORK/.skfl
   path:  .local/bin
   exit:  type 'exit'
 
