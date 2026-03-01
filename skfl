@@ -588,11 +588,11 @@ def source_pull(source_type_or_url, owner_repo, owner, repo, ref):
             "Specify a source: 'github OWNER/REPO', a GitHub URL, or --owner/--repo."
         )
 
-    source_name = f"{owner}__{repo}"
-    dest = r / SOURCES_DIR / "github" / source_name
+    source_key = f"{owner}/{repo}"
+    dest = r / SOURCES_DIR / "github" / owner / repo
 
     if dest.exists():
-        click.echo(f"Updating source {source_name}...")
+        click.echo(f"Updating source {source_key}...")
         cmd = ["git", "-C", str(dest), "fetch", "--depth=1", "origin"]
         if ref:
             cmd.append(ref)
@@ -602,25 +602,25 @@ def source_pull(source_type_or_url, owner_repo, owner, repo, ref):
             ["git", "-C", str(dest), "checkout", checkout_ref, "--", "."],
             check=True,
         )
-        click.echo(f"Updated {source_name}.")
+        click.echo(f"Updated {source_key}.")
     else:
-        click.echo(f"Pulling source {source_name}...")
+        click.echo(f"Pulling source {source_key}...")
         dest.parent.mkdir(parents=True, exist_ok=True)
         cmd = ["git", "clone", "--depth=1"]
         if ref:
             cmd += ["--branch", ref]
         cmd += [f"https://github.com/{owner}/{repo}.git", str(dest)]
         subprocess.run(cmd, check=True)
-        click.echo(f"Pulled {source_name} to {dest}.")
+        click.echo(f"Pulled {source_key} to {dest}.")
 
     config = load_config(r)
     config.setdefault("sources", {})
-    config["sources"][source_name] = {
+    config["sources"][source_key] = {
         "type": "github",
         "owner": owner,
         "repo": repo,
         "ref": ref or "",
-        "path": f"github/{source_name}",
+        "path": f"github/{owner}/{repo}",
     }
     save_config(r, config)
 

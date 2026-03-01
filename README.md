@@ -57,7 +57,7 @@ Start a repository with `skfl init`. This creates the directory structure `skfl`
   skfl.toml                   # repository configuration
   .gitignore
   10_sources/                 # raw source files
-    github/<owner>__<repo>/
+    github/<owner>/<repo>/
     custom/<name>/
   20_vetted/                  # snapshots of files as they were when vetted
   30_patches/                 # your patches on top of source files
@@ -94,10 +94,10 @@ Check what needs vetting with `skfl vet status`. Interactively vet files with `s
 
 After vetting a file, you can maintain one or more patches on top of it. Patches let you customize skills to your preferences without modifying the source directly. Your customizations are your own, independent of upstream changes, and survive source updates.
 
-Patches are stored in `30_patches/`, organized to mirror the source tree. For a source file at `10_sources/github/owner__repo/skills/my-skill.md`, patches live in `30_patches/github/owner__repo/skills/my-skill.md.d/` as numbered patch files:
+Patches are stored in `30_patches/`, organized to mirror the source tree. For a source file at `10_sources/github/owner/repo/skills/my-skill.md`, patches live in `30_patches/github/owner/repo/skills/my-skill.md.d/` as numbered patch files:
 
 ```
-30_patches/github/owner__repo/skills/my-skill.md.d/
+30_patches/github/owner/repo/skills/my-skill.md.d/
   001-add-context.patch
   002-fix-formatting.patch
 ```
