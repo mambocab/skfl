@@ -877,6 +877,21 @@ class TestSourcePullParsing:
         assert result.exit_code != 0
         assert "Specify" in result.output
 
+    def test_github_shorthand_rejects_missing_slash(self, repo):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["source", "pull", "github", "noslash"])
+        assert result.exit_code != 0
+        assert "OWNER/REPO" in result.output
+
+    def test_github_shorthand_rejects_extra_arg_after_url(self, repo):
+        runner = CliRunner()
+        result = runner.invoke(
+            skfl.cli,
+            ["source", "pull", "https://github.com/obra/superpowers", "extra"],
+        )
+        assert result.exit_code != 0
+        assert "Unexpected argument" in result.output
+
 
 # ── resolve_to_source_rel ─────────────────────────────────────────────
 

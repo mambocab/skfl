@@ -540,29 +540,52 @@ def source():
 
 
 @source.command("pull")
-@click.argument("url", required=False)
+@click.argument("source_type_or_url", required=False, metavar="[github|URL]")
+@click.argument("owner_repo", required=False, metavar="[OWNER/REPO]")
 @click.option("--owner", help="GitHub owner")
 @click.option("--repo", help="GitHub repo")
 @click.option("--ref", help="Git ref (branch, tag, commit)")
-def source_pull(url, owner, repo, ref):
-    """Pull or update a source from GitHub."""
+def source_pull(source_type_or_url, owner_repo, owner, repo, ref):
+    """Pull or update a source from GitHub.
+
+    \b
+    Examples:
+      skfl source pull github obra/superpowers
+      skfl source pull https://github.com/obra/superpowers
+      skfl source pull --owner obra --repo superpowers
+    """
     r = find_repo()
 
-    if url:
-        url = url.rstrip("/")
-        if url.endswith(".git"):
-            url = url[:-4]
-        parts = url.split("/")
-        try:
-            gh_idx = parts.index("github.com")
-            owner = parts[gh_idx + 1]
-            repo = parts[gh_idx + 2]
-        except (ValueError, IndexError):
-            raise click.ClickException(f"Could not parse GitHub URL: {url}")
+    arg = source_type_or_url
+    if arg:
+        if arg == "github" and owner_repo:
+            # skfl source pull github owner/repo
+            if "/" not in owner_repo:
+                raise click.ClickException(
+                    f"Expected OWNER/REPO, got: {owner_repo!r}"
+                )
+            owner, repo = owner_repo.split("/", 1)
+        else:
+            # Full URL form — owner_repo must be absent
+            if owner_repo:
+                raise click.ClickException(
+                    f"Unexpected argument {owner_repo!r}. "
+                    "Use: skfl source pull github OWNER/REPO"
+                )
+            url = arg.rstrip("/")
+            if url.endswith(".git"):
+                url = url[:-4]
+            parts = url.split("/")
+            try:
+                gh_idx = parts.index("github.com")
+                owner = parts[gh_idx + 1]
+                repo = parts[gh_idx + 2]
+            except (ValueError, IndexError):
+                raise click.ClickException(f"Could not parse GitHub URL: {url}")
 
     if not owner or not repo:
         raise click.ClickException(
-            "Specify a GitHub URL or --owner and --repo."
+            "Specify a source: 'github OWNER/REPO', a GitHub URL, or --owner/--repo."
         )
 
     source_name = f"{owner}__{repo}"
