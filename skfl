@@ -60,6 +60,93 @@ def find_repo(start: Path | None = None) -> Path:
     )
 
 
+def _repo_name(repo: Path) -> str:
+    """Short display name for a repo path, relative to home if possible."""
+    try:
+        return str(repo.relative_to(Path.home()))
+    except ValueError:
+        return str(repo)
+
+
+def find_all_repos() -> list[tuple[str, Path]]:
+    """Discover all standard skfl repositories as (name, path) pairs.
+
+    Searches, in order:
+      • ~/.skfl
+      • ~/.local/.skfl
+      • ~/*.skfl  (any *.skfl directory directly under the home directory)
+
+    Results are deduplicated by resolved path and ordered as discovered.
+    Only directories that contain a valid skfl.toml are included.
+    """
+    home = Path.home()
+    candidates: list[Path] = [
+        home / ".skfl",
+        home / ".local" / ".skfl",
+    ]
+    for p in sorted(home.glob("*.skfl")):
+        candidates.append(p)
+
+    seen: set[Path] = set()
+    result: list[tuple[str, Path]] = []
+    for p in candidates:
+        if not p.is_dir() or not (p / SKFL_TOML).is_file():
+            continue
+        resolved = p.resolve()
+        if resolved in seen:
+            continue
+        seen.add(resolved)
+        result.append((_repo_name(p), p))
+    return result
+
+
+def _resolve_repo_and_fpath(
+    path_str: str, repos: list[tuple[str, Path]]
+) -> tuple[Path, str]:
+    """Parse a possibly repo-prefixed source path into (repo, rest).
+
+    If path_str begins with '<repo_name>/' for a known repo, that repo is
+    selected and the prefix stripped.  Otherwise falls back to find_repo()
+    (cwd walk-up / $SKFL_REPO / ~/.skfl).
+    """
+    for name, repo in repos:
+        prefix = name + "/"
+        if path_str.startswith(prefix):
+            return repo, path_str[len(prefix):]
+    return find_repo(), path_str
+
+
+def _expand_repo_files(
+    fpaths: list[str], repos: list[tuple[str, Path]]
+) -> list[tuple[Path, str]]:
+    """Resolve and directory-expand a list of source paths to (repo, rel) pairs.
+
+    Each path in fpaths may be:
+      • '<repo_name>/<source_rel>' — routed to the named repo
+      • '<source_rel>' or absolute path — resolved via find_repo()
+      • A directory — expanded to all contained source files
+
+    Returns a list of (repo_path, source_rel_str) pairs.
+    """
+    result: list[tuple[Path, str]] = []
+    for fpath in fpaths:
+        repo, rel_str = _resolve_repo_and_fpath(fpath, repos)
+        sources = repo / SOURCES_DIR
+        try:
+            rel = resolve_to_source_rel(repo, rel_str)
+        except ValueError:
+            result.append((repo, rel_str))
+            continue
+        source_path = sources / rel
+        if source_path.is_dir():
+            for p in sorted(source_path.rglob("*")):
+                if p.is_file() and p.name != ".gitkeep":
+                    result.append((repo, str(p.relative_to(sources))))
+        else:
+            result.append((repo, rel_str))
+    return result
+
+
 def load_config(repo: Path) -> dict:
     with open(repo / SKFL_TOML, "rb") as f:
         return tomllib.load(f)
@@ -353,28 +440,60 @@ def _find_repo_for_completion() -> Path | None:
         return None
 
 
+def _find_repos_for_completion() -> list[tuple[str, Path]]:
+    """Return all repos for multi-repo completions.
+
+    Uses find_all_repos() for the standard locations.  Falls back to the
+    active repo (cwd / $SKFL_REPO / ~/.skfl) when no standard repos exist,
+    so completions work from any directory regardless of setup.
+    """
+    repos = find_all_repos()
+    if repos:
+        return repos
+    if (repo := _find_repo_for_completion()) is not None:
+        return [(_repo_name(repo), repo)]
+    return []
+
+
 def _complete_source_files(ctx, param, incomplete):
-    """Shell-completion callback: source files from 10_sources/ (repo-relative paths)."""
+    """Shell-completion callback: source files from all repos.
+
+    When multiple repos are found each value is prefixed with '<repo_name>/'
+    so the user can distinguish which repository a file belongs to.
+    When only one repo is active the prefix is omitted for backward compat.
+    """
     from click.shell_completion import CompletionItem
-    if (repo := _find_repo_for_completion()) is None:
+    repos = _find_repos_for_completion()
+    if not repos:
         return []
-    return [
-        CompletionItem(s)
-        for s in (str(rel) for rel in all_source_files(repo))
-        if s.startswith(incomplete)
-    ]
+    multi = len(repos) > 1
+    items = []
+    for name, repo in repos:
+        for rel in all_source_files(repo):
+            value = f"{name}/{rel}" if multi else str(rel)
+            if value.startswith(incomplete):
+                items.append(CompletionItem(value, help=name if multi else None))
+    return items
 
 
 def _complete_patch_files(ctx, param, incomplete):
-    """Shell-completion callback: patch files from 30_patches/ (repo-relative paths)."""
+    """Shell-completion callback: patch files from all repos.
+
+    Values are prefixed with '<repo_name>/' when multiple repos are present.
+    """
     from click.shell_completion import CompletionItem
-    if (repo := _find_repo_for_completion()) is None:
+    repos = _find_repos_for_completion()
+    if not repos:
         return []
-    return [
-        CompletionItem(s)
-        for s in (str(p.relative_to(repo)) for p in all_patch_files(repo))
-        if s.startswith(incomplete)
-    ]
+    multi = len(repos) > 1
+    items = []
+    for name, repo in repos:
+        for p in all_patch_files(repo):
+            rel_str = str(p.relative_to(repo))
+            value = f"{name}/{rel_str}" if multi else rel_str
+            if value.startswith(incomplete):
+                items.append(CompletionItem(value, help=name if multi else None))
+    return items
 
 
 def _complete_profiles(ctx, param, incomplete):
@@ -672,32 +791,49 @@ def source_list():
 @click.argument("files", nargs=-1, required=True, type=click.Path(), shell_complete=_complete_source_files)
 def vet(files):
     """Vet source files by reviewing and approving their content."""
-    r = find_repo()
-    do_vet_files(r, list(files))
+    repos = find_all_repos()
+    repo_files = _expand_repo_files(list(files), repos)
+    for repo, fpath in repo_files:
+        sources = repo / SOURCES_DIR
+        try:
+            rel = resolve_to_source_rel(repo, fpath)
+        except ValueError:
+            raise click.ClickException(
+                f"File {fpath} is not inside the sources directory ({sources})."
+            )
+        vet_single_file(repo, rel)
 
 
 @cli.command("vet-status")
 @click.argument("files", nargs=-1, type=click.Path(), shell_complete=_complete_source_files)
 def vet_status(files):
     """Show vetting status of source files."""
-    r = find_repo()
+    repos = find_all_repos()
     if files:
-        rels = []
-        for fpath in files:
+        repo_files = _expand_repo_files(list(files), repos)
+        for repo, fpath in repo_files:
             try:
-                rels.append(resolve_to_source_rel(r, fpath))
+                rel = resolve_to_source_rel(repo, fpath)
             except ValueError:
                 raise click.ClickException(f"File {fpath} is not inside sources.")
-    else:
-        rels = all_source_files(r)
-
-    if not rels:
-        click.echo("No source files found.")
+            status = vet_status_for_file(repo, rel)
+            click.echo(f"  {status:10s} {rel}")
         return
 
-    for rel in rels:
-        status = vet_status_for_file(r, rel)
-        click.echo(f"  {status:10s} {rel}")
+    # No files specified: show all files from all discovered repos.
+    if not repos:
+        repos = [(_repo_name(find_repo()), find_repo())]
+    multi = len(repos) > 1
+    found = False
+    for name, repo in repos:
+        for rel in all_source_files(repo):
+            found = True
+            status = vet_status_for_file(repo, rel)
+            display = f"{name}/{rel}" if multi else str(rel)
+            click.echo(f"  {status:10s} {display}")
+
+    if not found:
+        click.echo("No source files found.")
 
 
 # ── patch ──────────────────────────────────────────────────────────────
@@ -712,11 +848,12 @@ def patch():
 @click.option("--name", "-n", default=None, help="Short description for the patch filename.")
 def patch_create(source_file, name):
     """Create a new patch for a vetted source file."""
-    r = find_repo()
+    repos = find_all_repos()
+    r, source_file_str = _resolve_repo_and_fpath(source_file, repos)
     sources = r / SOURCES_DIR
 
     try:
-        rel = resolve_to_source_rel(r, source_file)
+        rel = resolve_to_source_rel(r, source_file_str)
     except ValueError:
         raise click.ClickException(
             f"File {source_file} is not inside the sources directory."
@@ -794,13 +931,14 @@ def patch_create(source_file, name):
 @click.argument("source_file", required=False, type=click.Path(), shell_complete=_complete_source_files)
 def patch_list(source_file):
     """List patches, optionally for a specific source file."""
-    r = find_repo()
+    repos = find_all_repos()
 
     if source_file:
+        r, sf_str = _resolve_repo_and_fpath(source_file, repos)
         try:
-            rel = resolve_to_source_rel(r, source_file)
+            rel = resolve_to_source_rel(r, sf_str)
         except ValueError:
-            rel = Path(source_file)
+            rel = Path(sf_str)
 
         patches = list_patches_for(r, rel)
         if not patches:
@@ -810,20 +948,28 @@ def patch_list(source_file):
         for p in patches:
             click.echo(f"  {p.name}")
     else:
-        patches = all_patch_files(r)
-        if not patches:
+        # List patches from all repos.
+        if not repos:
+            repos = [(_repo_name(find_repo()), find_repo())]
+        multi = len(repos) > 1
+        found = False
+        for name, repo in repos:
+            for p in all_patch_files(repo):
+                found = True
+                rel_str = str(p.relative_to(repo))
+                display = f"{name}/{rel_str}" if multi else rel_str
+                click.echo(f"  {display}")
+        if not found:
             click.echo("No patches.")
-            return
-        for p in patches:
-            click.echo(f"  {p.relative_to(r)}")
 
 
 @patch.command("remove")
 @click.argument("patch_file", type=click.Path(), shell_complete=_complete_patch_files)
 def patch_remove(patch_file):
     """Remove a patch."""
-    r = find_repo()
-    patch_path = Path(patch_file)
+    repos = find_all_repos()
+    r, pf_str = _resolve_repo_and_fpath(patch_file, repos)
+    patch_path = Path(pf_str)
 
     if not patch_path.is_absolute():
         candidate = r / patch_path
@@ -862,8 +1008,38 @@ def stage(ctx):
 @click.argument("files", nargs=-1, required=True, type=click.Path(), shell_complete=_complete_source_files)
 def stage_default(profile, files):
     """Stage the specified source files."""
-    r = find_repo()
-    do_stage_files(r, list(files), profile=profile)
+    repos = find_all_repos()
+    repo_files = _expand_repo_files(list(files), repos)
+    sources_cache: dict[Path, Path] = {}
+    for repo, fpath in repo_files:
+        sources = sources_cache.setdefault(repo, repo / SOURCES_DIR)
+        try:
+            rel = resolve_to_source_rel(repo, fpath)
+        except ValueError:
+            raise click.ClickException(
+                f"File {fpath} is not inside the sources directory."
+            )
+
+        source_path = sources / rel
+        if not source_path.is_file():
+            raise click.ClickException(f"Source file not found: {source_path}")
+
+        status = vet_status_for_file(repo, rel)
+        if status in ("unvetted", "modified"):
+            if not vet_single_file(repo, rel):
+                continue
+
+        if profile:
+            staged_path = repo / STAGED_DIR / profile / rel
+        else:
+            staged_path = repo / STAGED_DIR / rel
+        n_patches = _stage_single_file(repo, source_path, rel, staged_path, profile=profile)
+        patch_note = (
+            f" ({n_patches} patch{'es' if n_patches != 1 else ''} applied)"
+            if n_patches else ""
+        )
+        profile_note = f" [profile: {profile}]" if profile else ""
+        click.echo(f"  staged: {rel}{patch_note}{profile_note}")
 
 
 @stage.command("list")

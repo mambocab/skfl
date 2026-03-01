@@ -1892,3 +1892,396 @@ class TestCompletionWiring:
 
     def test_package_install_stow_name_wired(self):
         assert self._custom_complete(skfl.package_install_stow, "name") is skfl._complete_packages
+
+
+# ── multi-repo: find_all_repos ────────────────────────────────────────
+
+
+def _init_repo(path: Path) -> Path:
+    """Helper: initialise an skfl repo at path and return path."""
+    CliRunner().invoke(skfl.cli, ["init", str(path)])
+    return path
+
+
+class TestFindAllRepos:
+    """Tests for find_all_repos() — standard-location discovery."""
+
+    def test_finds_dot_skfl_repo(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _init_repo(fake_home / ".skfl")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        assert fake_home / ".skfl" in [p for _, p in repos]
+
+    def test_finds_local_skfl_repo(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _init_repo(fake_home / ".local" / ".skfl")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        assert fake_home / ".local" / ".skfl" in [p for _, p in repos]
+
+    def test_finds_glob_skfl_repos(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _init_repo(fake_home / "work.skfl")
+        _init_repo(fake_home / "personal.skfl")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        names = {n for n, _ in repos}
+        assert "work.skfl" in names
+        assert "personal.skfl" in names
+
+    def test_finds_multiple_standard_repos(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _init_repo(fake_home / ".skfl")
+        _init_repo(fake_home / "work.skfl")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        assert len(repos) == 2
+
+    def test_deduplicates_repos(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        # ~/.skfl — found both by explicit check and by *.skfl glob if dotfiles match
+        _init_repo(fake_home / ".skfl")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        resolved = [p.resolve() for _, p in repos]
+        assert len(resolved) == len(set(resolved))
+
+    def test_ignores_dirs_without_skfl_toml(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        (fake_home / "not-a-repo.skfl").mkdir()  # no skfl.toml
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        names = {n for n, _ in repos}
+        assert "not-a-repo.skfl" not in names
+
+    def test_returns_empty_when_no_repos(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        assert skfl.find_all_repos() == []
+
+    def test_repo_names_relative_to_home(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _init_repo(fake_home / ".skfl")
+        _init_repo(fake_home / "work.skfl")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        names = {n for n, _ in repos}
+        assert ".skfl" in names
+        assert "work.skfl" in names
+
+    def test_local_skfl_name(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        _init_repo(fake_home / ".local" / ".skfl")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repos = skfl.find_all_repos()
+        names = {n for n, _ in repos}
+        assert ".local/.skfl" in names
+
+
+# ── multi-repo: _resolve_repo_and_fpath ──────────────────────────────
+
+
+class TestResolveRepoAndFpath:
+    """Tests for _resolve_repo_and_fpath()."""
+
+    def _make_repos(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo1 = _init_repo(fake_home / ".skfl")
+        repo2 = _init_repo(fake_home / "work.skfl")
+        repos = [(".skfl", repo1), ("work.skfl", repo2)]
+        return repo1, repo2, repos
+
+    def test_strips_first_repo_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        repo1, repo2, repos = self._make_repos(tmp_path, monkeypatch)
+        os.chdir(repo1)
+        r, path = skfl._resolve_repo_and_fpath(".skfl/custom/foo.md", repos)
+        assert r == repo1
+        assert path == "custom/foo.md"
+
+    def test_strips_second_repo_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        repo1, repo2, repos = self._make_repos(tmp_path, monkeypatch)
+        os.chdir(repo1)
+        r, path = skfl._resolve_repo_and_fpath("work.skfl/custom/bar.md", repos)
+        assert r == repo2
+        assert path == "custom/bar.md"
+
+    def test_no_prefix_falls_back_to_find_repo(self, tmp_path, monkeypatch, tmp_dir):
+        repo1, repo2, repos = self._make_repos(tmp_path, monkeypatch)
+        os.chdir(repo1)
+        r, path = skfl._resolve_repo_and_fpath("custom/baz.md", repos)
+        assert r == repo1
+        assert path == "custom/baz.md"
+
+    def test_empty_repos_list_falls_back(self, tmp_path, monkeypatch, repo):
+        """With empty repos list, always falls back to find_repo() (cwd)."""
+        r, path = skfl._resolve_repo_and_fpath("custom/foo.md", [])
+        assert r == repo
+        assert path == "custom/foo.md"
+
+    def test_no_match_raises_when_not_in_repo(self, tmp_dir):
+        with pytest.raises(Exception, match="Not inside an skfl repository"):
+            skfl._resolve_repo_and_fpath("custom/foo.md", [])
+
+
+# ── multi-repo: _expand_repo_files ───────────────────────────────────
+
+
+class TestExpandRepoFiles:
+    def _make_two_repos(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo1 = _init_repo(fake_home / ".skfl")
+        repo2 = _init_repo(fake_home / "work.skfl")
+        # Add a source file to each repo
+        src1 = repo1 / skfl.SOURCES_DIR / "custom" / "s1" / "a.md"
+        src1.parent.mkdir(parents=True)
+        src1.write_text("# A\n")
+        src2 = repo2 / skfl.SOURCES_DIR / "custom" / "s2" / "b.md"
+        src2.parent.mkdir(parents=True)
+        src2.write_text("# B\n")
+        repos = [(".skfl", repo1), ("work.skfl", repo2)]
+        return repo1, repo2, repos
+
+    def test_routes_prefixed_path_to_correct_repo(self, tmp_path, monkeypatch, tmp_dir):
+        repo1, repo2, repos = self._make_two_repos(tmp_path, monkeypatch)
+        os.chdir(repo1)
+        result = skfl._expand_repo_files([".skfl/custom/s1/a.md"], repos)
+        assert len(result) == 1
+        assert result[0][0] == repo1
+        assert result[0][1] == "custom/s1/a.md"
+
+    def test_expands_directory(self, tmp_path, monkeypatch, tmp_dir):
+        repo1, repo2, repos = self._make_two_repos(tmp_path, monkeypatch)
+        # Add a second file to repo1 so directory expansion returns multiple
+        extra = repo1 / skfl.SOURCES_DIR / "custom" / "s1" / "c.md"
+        extra.write_text("# C\n")
+        os.chdir(repo1)
+        result = skfl._expand_repo_files([".skfl/custom/s1"], repos)
+        paths = [p for _, p in result]
+        assert "custom/s1/a.md" in paths
+        assert "custom/s1/c.md" in paths
+
+    def test_multiple_repos_in_one_call(self, tmp_path, monkeypatch, tmp_dir):
+        repo1, repo2, repos = self._make_two_repos(tmp_path, monkeypatch)
+        result = skfl._expand_repo_files(
+            [".skfl/custom/s1/a.md", "work.skfl/custom/s2/b.md"], repos
+        )
+        assert len(result) == 2
+        assert result[0][0] == repo1
+        assert result[1][0] == repo2
+
+
+# ── multi-repo: completion ────────────────────────────────────────────
+
+
+class TestMultiRepoSourceFilesCompletion:
+    """_complete_source_files behaviour with multiple repositories."""
+
+    def _make_two_repos_with_files(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo1 = _init_repo(fake_home / ".skfl")
+        repo2 = _init_repo(fake_home / "work.skfl")
+        f1 = repo1 / skfl.SOURCES_DIR / "custom" / "src1" / "hello.md"
+        f1.parent.mkdir(parents=True)
+        f1.write_text("# Hello\n")
+        f2 = repo2 / skfl.SOURCES_DIR / "custom" / "src2" / "world.md"
+        f2.parent.mkdir(parents=True)
+        f2.write_text("# World\n")
+        return repo1, repo2
+
+    def test_single_repo_no_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo = _init_repo(fake_home / ".skfl")
+        src = repo / skfl.SOURCES_DIR / "custom" / "test" / "file.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("# File\n")
+
+        results = skfl._complete_source_files(None, None, "")
+        values = {r.value for r in results}
+        # Single repo — no prefix
+        assert "custom/test/file.md" in values
+        assert not any(v.startswith(".skfl/") for v in values)
+
+    def test_multi_repo_adds_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        self._make_two_repos_with_files(tmp_path, monkeypatch)
+        results = skfl._complete_source_files(None, None, "")
+        values = {r.value for r in results}
+        assert ".skfl/custom/src1/hello.md" in values
+        assert "work.skfl/custom/src2/world.md" in values
+
+    def test_multi_repo_filter_by_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        self._make_two_repos_with_files(tmp_path, monkeypatch)
+        results = skfl._complete_source_files(None, None, ".skfl/")
+        values = {r.value for r in results}
+        assert ".skfl/custom/src1/hello.md" in values
+        assert "work.skfl/custom/src2/world.md" not in values
+
+    def test_multi_repo_help_text_set(self, tmp_path, monkeypatch, tmp_dir):
+        self._make_two_repos_with_files(tmp_path, monkeypatch)
+        results = skfl._complete_source_files(None, None, "")
+        assert all(r.help is not None for r in results)
+
+    def test_single_repo_no_help_text(self, tmp_path, monkeypatch, tmp_dir):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo = _init_repo(fake_home / ".skfl")
+        src = repo / skfl.SOURCES_DIR / "custom" / "test" / "file.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("# File\n")
+        results = skfl._complete_source_files(None, None, "")
+        assert all(r.help is None for r in results)
+
+    def test_no_repos_returns_empty(self, tmp_path, monkeypatch, tmp_dir):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        results = skfl._complete_source_files(None, None, "")
+        assert results == []
+
+    def test_files_from_both_repos_present(self, tmp_path, monkeypatch, tmp_dir):
+        self._make_two_repos_with_files(tmp_path, monkeypatch)
+        results = skfl._complete_source_files(None, None, "")
+        values = {r.value for r in results}
+        assert any(".skfl/" in v for v in values)
+        assert any("work.skfl/" in v for v in values)
+
+
+class TestMultiRepoPatchFilesCompletion:
+    """_complete_patch_files behaviour with multiple repositories."""
+
+    def _make_two_repos_with_patches(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo1 = _init_repo(fake_home / ".skfl")
+        repo2 = _init_repo(fake_home / "work.skfl")
+        # Create a patch in each repo
+        rel = Path("custom/test/hello.md")
+        for repo in (repo1, repo2):
+            pdir = skfl.patches_dir_for(repo, rel)
+            pdir.mkdir(parents=True, exist_ok=True)
+            (pdir / "001-test.patch").write_text("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n")
+        return repo1, repo2
+
+    def test_multi_repo_patch_completion_has_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        self._make_two_repos_with_patches(tmp_path, monkeypatch)
+        results = skfl._complete_patch_files(None, None, "")
+        values = {r.value for r in results}
+        assert any(v.startswith(".skfl/") for v in values)
+        assert any(v.startswith("work.skfl/") for v in values)
+
+    def test_single_repo_patch_no_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo = _init_repo(fake_home / ".skfl")
+        rel = Path("custom/test/hello.md")
+        pdir = skfl.patches_dir_for(repo, rel)
+        pdir.mkdir(parents=True, exist_ok=True)
+        (pdir / "001-test.patch").write_text("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n")
+
+        results = skfl._complete_patch_files(None, None, "")
+        values = {r.value for r in results}
+        assert all(v.startswith("30_patches/") for v in values)
+        assert not any(v.startswith(".skfl/") for v in values)
+
+
+# ── multi-repo: vet command ───────────────────────────────────────────
+
+
+class TestMultiRepoVetCommand:
+    """End-to-end tests for 'skfl vet' with repo-prefixed paths."""
+
+    def test_vet_with_repo_prefix(self, tmp_path, monkeypatch, tmp_dir):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo = _init_repo(fake_home / ".skfl")
+        src = repo / skfl.SOURCES_DIR / "custom" / "test" / "hello.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("# Hello\n")
+
+        runner = CliRunner()
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli, ["vet", ".skfl/custom/test/hello.md"], input="y\n"
+            )
+        assert result.exit_code == 0
+        assert "vetted" in result.output
+
+    def test_vet_correct_repo_selected(self, tmp_path, monkeypatch, tmp_dir):
+        """File in work.skfl repo is vetted in the right repo."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        _init_repo(fake_home / ".skfl")
+        repo2 = _init_repo(fake_home / "work.skfl")
+        src = repo2 / skfl.SOURCES_DIR / "custom" / "test" / "skill.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("# Skill\n")
+
+        runner = CliRunner()
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli, ["vet", "work.skfl/custom/test/skill.md"], input="y\n"
+            )
+        assert result.exit_code == 0
+        # Verify the vetted hash was stored in work.skfl, not .skfl
+        rel = Path("custom/test/skill.md")
+        assert skfl.read_vetted_hash(repo2, rel) is not None
+        default_repo = fake_home / ".skfl"
+        assert skfl.read_vetted_hash(default_repo, rel) is None
+
+
+# ── multi-repo: vet-status command ───────────────────────────────────
+
+
+class TestMultiRepoVetStatusCommand:
+    def test_no_args_shows_all_repos(self, tmp_path, monkeypatch, tmp_dir):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo1 = _init_repo(fake_home / ".skfl")
+        repo2 = _init_repo(fake_home / "work.skfl")
+        (repo1 / skfl.SOURCES_DIR / "custom" / "r1" / "a.md").parent.mkdir(parents=True)
+        (repo1 / skfl.SOURCES_DIR / "custom" / "r1" / "a.md").write_text("# A\n")
+        (repo2 / skfl.SOURCES_DIR / "custom" / "r2" / "b.md").parent.mkdir(parents=True)
+        (repo2 / skfl.SOURCES_DIR / "custom" / "r2" / "b.md").write_text("# B\n")
+
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["vet-status"])
+        assert result.exit_code == 0
+        assert ".skfl/custom/r1/a.md" in result.output
+        assert "work.skfl/custom/r2/b.md" in result.output
+
+    def test_with_repo_prefix_arg(self, tmp_path, monkeypatch, tmp_dir):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        repo = _init_repo(fake_home / ".skfl")
+        src = repo / skfl.SOURCES_DIR / "custom" / "test" / "hello.md"
+        src.parent.mkdir(parents=True)
+        src.write_text("# Hello\n")
+
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["vet-status", ".skfl/custom/test/hello.md"])
+        assert result.exit_code == 0
+        assert "unvetted" in result.output
