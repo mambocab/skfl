@@ -1750,6 +1750,38 @@ class TestCompletionHelpers:
         assert "work" in values
         assert "stray.txt" not in values
 
+    # ── _complete_packages ────────────────────────────────────────────
+
+    def test_packages_returns_all_packages(self, repo):
+        (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "work-tools").mkdir(parents=True, exist_ok=True)
+        results = skfl._complete_packages(None, None, "")
+        values = {r.value for r in results}
+        assert "dotfiles" in values
+        assert "work-tools" in values
+
+    def test_packages_filters_by_prefix(self, repo):
+        (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "work-tools").mkdir(parents=True, exist_ok=True)
+        results = skfl._complete_packages(None, None, "dot")
+        values = {r.value for r in results}
+        assert "dotfiles" in values
+        assert "work-tools" not in values
+
+    def test_packages_no_packages_dir(self, repo):
+        results = skfl._complete_packages(None, None, "")
+        assert results == []
+
+    def test_packages_no_repo(self, tmp_dir):
+        results = skfl._complete_packages(None, None, "")
+        assert results == []
+
+    def test_packages_returns_completion_items(self, repo):
+        from click.shell_completion import CompletionItem
+        (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        results = skfl._complete_packages(None, None, "")
+        assert all(isinstance(r, CompletionItem) for r in results)
+
 
 # ── completion command ────────────────────────────────────────────────
 
@@ -1827,3 +1859,21 @@ class TestCompletionWiring:
 
     def test_stage_list_profile_wired(self):
         assert self._custom_complete(skfl.stage_list, "profile") is skfl._complete_profiles
+
+    def test_package_add_name_wired(self):
+        assert self._custom_complete(skfl.package_add, "name") is skfl._complete_packages
+
+    def test_package_add_source_path_wired(self):
+        assert self._custom_complete(skfl.package_add, "source_path") is skfl._complete_source_files
+
+    def test_package_build_name_wired(self):
+        assert self._custom_complete(skfl.package_build, "name") is skfl._complete_packages
+
+    def test_package_build_profile_wired(self):
+        assert self._custom_complete(skfl.package_build, "profile") is skfl._complete_profiles
+
+    def test_package_install_rsync_name_wired(self):
+        assert self._custom_complete(skfl.package_install_rsync, "name") is skfl._complete_packages
+
+    def test_package_install_stow_name_wired(self):
+        assert self._custom_complete(skfl.package_install_stow, "name") is skfl._complete_packages

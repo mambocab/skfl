@@ -392,6 +392,21 @@ def _complete_profiles(ctx, param, incomplete):
     ]
 
 
+def _complete_packages(ctx, param, incomplete):
+    """Shell-completion callback: package names from 50_packages/ subdirectories."""
+    from click.shell_completion import CompletionItem
+    if (repo := _find_repo_for_completion()) is None:
+        return []
+    packages_dir = repo / PACKAGES_DIR
+    if not packages_dir.is_dir():
+        return []
+    return [
+        CompletionItem(p.name)
+        for p in sorted(packages_dir.iterdir())
+        if p.is_dir() and p.name.startswith(incomplete)
+    ]
+
+
 def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> None:
     """Stage the given source files, optionally under a named profile."""
     files = expand_paths(repo, files)
@@ -888,8 +903,8 @@ def package_list():
 
 
 @package.command("add")
-@click.argument("name")
-@click.argument("source_path", type=click.Path())
+@click.argument("name", shell_complete=_complete_packages)
+@click.argument("source_path", type=click.Path(), shell_complete=_complete_source_files)
 @click.argument("dest_path", type=click.Path())
 def package_add(name, source_path, dest_path):
     """Add a file or directory to a package as a symlink.
@@ -929,8 +944,8 @@ def package_add(name, source_path, dest_path):
 
 
 @package.command("build")
-@click.argument("name")
-@click.option("--as", "profile", default=None, help="Apply profile-specific patches.")
+@click.argument("name", shell_complete=_complete_packages)
+@click.option("--as", "profile", default=None, help="Apply profile-specific patches.", shell_complete=_complete_profiles)
 def package_build(name, profile):
     """Build a package: vet-check, apply patches, stage to 40_staged/<name>/."""
     r = find_repo()
@@ -957,7 +972,7 @@ def install():
 
 
 @install.command("rsync")
-@click.argument("name")
+@click.argument("name", shell_complete=_complete_packages)
 @click.argument("target", type=click.Path())
 def package_install_rsync(name, target):
     """Install a package using rsync."""
@@ -971,7 +986,7 @@ def package_install_rsync(name, target):
 
 
 @install.command("stow")
-@click.argument("name")
+@click.argument("name", shell_complete=_complete_packages)
 @click.argument("target", type=click.Path())
 def package_install_stow(name, target):
     """Install a package using GNU Stow."""
