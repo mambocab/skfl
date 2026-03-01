@@ -37,7 +37,7 @@ BIN="$WORK/.local/bin"
 mkdir -p "$BIN"
 
 for cmd in uv python3 git diff patch less env sh \
-           cat cp mkdir rm chmod ls wc head tail sort find sed \
+           cat cp mv mkdir rm chmod ls wc head tail sort find sed \
            rsync stow glow fzf "${EXTRA_CMDS[@]}"; do
     p="$(command -v "$cmd" 2>/dev/null || true)"
     if [ -n "$p" ]; then
@@ -95,7 +95,7 @@ cat <<EOF
 EOF
 
 case "$SHELL" in
-    */zsh)  ZDOTDIR="$WORK" PATH="$BIN" HOME="$WORK" exec "$SHELL" ;;
+    */zsh)  ZDOTDIR="$WORK" PATH="$BIN" HOME="$WORK" exec "$SHELL" --no-globalrcs ;;
     */bash) PATH="$BIN" HOME="$WORK" exec "$SHELL" --init-file "$WORK/.bashrc" ;;
     *)      PATH="$BIN" HOME="$WORK" PS1='(skfl-dev) $ ' exec "$SHELL" --norc --noprofile ;;
 esac
