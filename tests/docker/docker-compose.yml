@@ -1,0 +1,60 @@
+services:
+
+  # ── Full test suite on each distribution ──────────────────────────────
+
+  test-debian:
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile.debian
+    volumes:
+      - ../..:/src:ro
+    command: >-
+      sh -c "
+        pytest tests/test_skfl.py -v -p no:cacheprovider &&
+        bats tests/bats/skfl.bats &&
+        bats tests/bats/missing-deps.bats
+      "
+
+  test-fedora:
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile.fedora
+    volumes:
+      - ../..:/src:ro
+    command: >-
+      sh -c "
+        pytest tests/test_skfl.py -v -p no:cacheprovider &&
+        bats tests/bats/skfl.bats &&
+        bats tests/bats/missing-deps.bats
+      "
+
+  test-alpine:
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile.alpine
+    volumes:
+      - ../..:/src:ro
+    command: >-
+      sh -c "
+        pytest tests/test_skfl.py -v -p no:cacheprovider &&
+        bats tests/bats/skfl.bats &&
+        bats tests/bats/missing-deps.bats
+      "
+
+  # ── Minimal image: only required deps ─────────────────────────────────
+  # Runs pytest (unit tests don't need optional tools) and
+  # missing-deps.bats (which tests graceful degradation).
+  # Does NOT run the full skfl.bats since those tests expect
+  # optional tools like rsync to be available on the host.
+
+  test-minimal:
+    build:
+      context: ../..
+      dockerfile: tests/docker/Dockerfile.minimal
+    volumes:
+      - ../..:/src:ro
+    command: >-
+      sh -c "
+        pytest tests/test_skfl.py -v -p no:cacheprovider &&
+        bats tests/bats/missing-deps.bats
+      "

@@ -1,0 +1,29 @@
+FROM alpine:3.21
+
+RUN apk add --no-cache \
+    python3 \
+    py3-pip \
+    py3-click \
+    bash \
+    diffutils \
+    patch \
+    rsync \
+    stow \
+    git \
+    coreutils \
+    findutils \
+    sed \
+    grep
+
+RUN pip install --no-cache-dir --break-system-packages \
+    tomli-w \
+    pytest
+
+# Install bats-core from source for a consistent, recent version.
+RUN git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core \
+    && /tmp/bats-core/install.sh /usr/local \
+    && rm -rf /tmp/bats-core
+
+ENV PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /src

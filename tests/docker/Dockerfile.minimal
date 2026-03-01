@@ -1,0 +1,32 @@
+# Minimal image: only required runtime dependencies.
+# rsync, stow, glow, and fzf are intentionally absent.
+# Used to run pytest and missing-deps.bats (NOT the full bats suite,
+# since some tests there expect optional tools to be available).
+
+FROM debian:bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 \
+    python3-pip \
+    diffutils \
+    patch \
+    git \
+    bash \
+    coreutils \
+    findutils \
+    sed \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir --break-system-packages \
+    click \
+    tomli-w \
+    pytest
+
+# Install bats-core from source for a consistent, recent version.
+RUN git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core \
+    && /tmp/bats-core/install.sh /usr/local \
+    && rm -rf /tmp/bats-core
+
+ENV PYTHONDONTWRITEBYTECODE=1
+
+WORKDIR /src
