@@ -669,20 +669,14 @@ teardown() {
     [ "$status" -ne 0 ]
 }
 
-@test "package full workflow: init -> add -> build -> install rsync" {
+@test "package full workflow: init -> add -> install rsync (build on demand)" {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
     vet_file_in_chroot custom/test/skill.md
     skfl_in_chroot package init my-setup
     skfl_in_chroot package add my-setup custom/test/skill.md skills/skill.md
-    run skfl_in_chroot package build my-setup
-    [ "$status" -eq 0 ]
-    # Staged file exists at correct path
-    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/my-setup/skills/skill.md"
-    [ "$status" -eq 0 ]
-    [[ "$output" == "# Skill" ]]
-    # Install
+    # Install without explicit build — should build on demand
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/target"
     run skfl_in_chroot package install rsync my-setup /tmp/target
     [ "$status" -eq 0 ]

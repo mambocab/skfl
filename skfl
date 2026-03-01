@@ -1166,12 +1166,10 @@ def package_build(name, profile):
 
 
 def _resolve_install_paths(repo: Path, name: str, tool: str, target: str) -> tuple[Path, Path]:
-    """Validate a package is built and a tool is available; return (staged_dir, target_path)."""
+    """Build (if needed), validate tool, resolve target; return (staged_dir, target_path)."""
     staged = repo / STAGED_DIR / name
     if not staged.is_dir():
-        raise click.ClickException(
-            f"Package '{name}' has not been built. Run 'skfl package build {name}' first."
-        )
+        do_build_package(repo, name)
     if not shutil.which(tool):
         raise click.ClickException(f"{tool} is not installed. Install it and try again.")
     target_path = Path(target).resolve()

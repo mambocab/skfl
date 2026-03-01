@@ -1553,14 +1553,34 @@ class TestPackageInstall:
         assert (target / "hello.md").is_file()
         assert (target / "hello.md").read_text() == "# Hello\n\nWorld\n"
 
-    def test_package_install_rsync_fails_if_not_built(self, repo_with_source, tmp_path):
+    def test_package_install_rsync_builds_on_demand(self, repo_with_source, tmp_path):
+        runner = CliRunner()
+        _vet(repo_with_source, "custom/test-src/hello.md")
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(
+            skfl.cli,
+            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
+        )
+        # No explicit build — install should trigger it automatically
+        target = tmp_path / "install-target"
+        result = runner.invoke(
+            skfl.cli, ["package", "install", "rsync", "my-pkg", str(target)]
+        )
+        assert result.exit_code == 0
+        assert (target / "hello.md").is_file()
+
+    def test_package_install_rsync_fails_on_unvetted(self, repo_with_source, tmp_path):
         runner = CliRunner()
         runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(
+            skfl.cli,
+            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
+        )
         result = runner.invoke(
             skfl.cli, ["package", "install", "rsync", "my-pkg", str(tmp_path)]
         )
         assert result.exit_code != 0
-        assert "not been built" in result.output or "does not exist" in result.output
+        assert "not vetted" in result.output.lower() or "unvetted" in result.output.lower()
 
 
 # ── removed commands ───────────────────────────────────────────────────
