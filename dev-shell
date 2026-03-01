@@ -49,10 +49,10 @@ done
 
 # skfl: copy the source and create a thin wrapper that invokes it via `uv run`.
 command -v uv >/dev/null 2>&1 || { echo "error: uv is required but not found" >&2; exit 1; }
-cp "$SCRIPT_DIR/skfl" "$WORK/.local/skfl.py"
+cp "$SCRIPT_DIR/skfl" "$WORK/.local/skfl"
 cat > "$BIN/skfl" <<'WRAPPER'
 #!/bin/sh
-exec uv run --script "${0%/*}/../skfl.py" "$@"
+exec uv run --script "${0%/*}/../skfl" "$@"
 WRAPPER
 chmod +x "$BIN/skfl"
 
