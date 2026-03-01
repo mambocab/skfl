@@ -21,6 +21,11 @@ done
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 WORK="$(mktemp -d)"
 
+# Preserve the real uv Python cache so uv doesn't re-download/re-patch
+# Python into the temp HOME directory on every run.
+UV_PYTHON_INSTALL_DIR="${UV_PYTHON_INSTALL_DIR:-$HOME/.local/share/uv/python}"
+export UV_PYTHON_INSTALL_DIR
+
 cleanup() {
     rm -rf "$WORK"
 }
