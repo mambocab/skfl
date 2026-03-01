@@ -1084,7 +1084,7 @@ def package():
     """Manage packages: named, installable subsets of vetted sources."""
 
 
-@package.command("new")
+@package.command("init")
 @click.argument("name")
 def package_new(name):
     """Create a new empty package."""
@@ -1129,7 +1129,7 @@ def package_add(name, source_path, dest_path):
     pkg_dir = r / PACKAGES_DIR / name
     if not pkg_dir.is_dir():
         raise click.ClickException(
-            f"Package '{name}' not found. Run 'skfl package new {name}' first."
+            f"Package '{name}' not found. Run 'skfl package init {name}' first."
         )
 
     sources = r / SOURCES_DIR

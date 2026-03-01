@@ -1261,20 +1261,20 @@ class TestStageWithProfile:
         assert b"profiled" in staged_py
 
 
-# ── package new / package list ─────────────────────────────────────────
+# ── package init / package list ────────────────────────────────────────
 
 
 class TestPackageNew:
-    def test_package_new_creates_directory(self, repo):
+    def test_package_init_creates_directory(self, repo):
         runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        result = runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         assert result.exit_code == 0
         assert (repo / skfl.PACKAGES_DIR / "my-pkg").is_dir()
 
-    def test_package_new_fails_on_duplicate(self, repo):
+    def test_package_init_fails_on_duplicate(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
-        result = runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        result = runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         assert result.exit_code != 0
         assert "already exists" in result.output
 
@@ -1288,8 +1288,8 @@ class TestPackageList:
 
     def test_package_list_shows_packages(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "alpha"])
-        runner.invoke(skfl.cli, ["package", "new", "beta"])
+        runner.invoke(skfl.cli, ["package", "init", "alpha"])
+        runner.invoke(skfl.cli, ["package", "init", "beta"])
         result = runner.invoke(skfl.cli, ["package", "list"])
         assert result.exit_code == 0
         assert "alpha" in result.output
@@ -1302,7 +1302,7 @@ class TestPackageList:
 class TestPackageAdd:
     def test_package_add_creates_file_symlink(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1316,7 +1316,7 @@ class TestPackageAdd:
 
     def test_package_add_creates_directory_symlink(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/sub", "subdir"],
@@ -1330,7 +1330,7 @@ class TestPackageAdd:
 
     def test_package_add_creates_nested_dest(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "deep/nested/hello.md"],
@@ -1350,7 +1350,7 @@ class TestPackageAdd:
 
     def test_package_add_fails_if_source_missing(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/nonexistent.md", "x.md"],
@@ -1359,7 +1359,7 @@ class TestPackageAdd:
 
     def test_package_add_fails_if_dest_exists(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1378,7 +1378,7 @@ class TestPackageAdd:
 class TestResolvePackageFiles:
     def test_resolve_package_files_file_symlink(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1391,7 +1391,7 @@ class TestResolvePackageFiles:
 
     def test_resolve_package_files_directory_symlink(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/sub", "subdir"],
@@ -1418,7 +1418,7 @@ class TestPackageBuild:
     def test_package_build_stages_file(self, repo_with_source):
         runner = CliRunner()
         _vet(repo_with_source, "custom/test-src/hello.md")
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1431,7 +1431,7 @@ class TestPackageBuild:
 
     def test_package_build_refuses_unvetted(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1446,7 +1446,7 @@ class TestPackageBuild:
         (repo_with_source / "10_sources" / "custom" / "test-src" / "hello.md").write_text(
             "changed\n"
         )
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1472,7 +1472,7 @@ class TestPackageBuild:
         )
         (patch_dir / "001-append.patch").write_bytes(proc.stdout)
 
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1485,7 +1485,7 @@ class TestPackageBuild:
     def test_package_build_expands_directory_symlink(self, repo_with_source):
         runner = CliRunner()
         _vet(repo_with_source, "custom/test-src/sub/nested.txt")
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/sub", "mydir"],
@@ -1521,7 +1521,7 @@ class TestPackageBuild:
         )
         (patch_dir / "001-profile.patch").write_bytes(proc.stdout)
 
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1539,7 +1539,7 @@ class TestPackageInstall:
     def test_package_install_rsync(self, repo_with_source, tmp_path):
         runner = CliRunner()
         _vet(repo_with_source, "custom/test-src/hello.md")
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1555,7 +1555,7 @@ class TestPackageInstall:
 
     def test_package_install_rsync_fails_if_not_built(self, repo_with_source, tmp_path):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "new", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         result = runner.invoke(
             skfl.cli, ["package", "install", "rsync", "my-pkg", str(tmp_path)]
         )

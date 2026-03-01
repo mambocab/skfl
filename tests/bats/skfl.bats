@@ -621,18 +621,18 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
-@test "package new creates directory" {
+@test "package init creates directory" {
     skfl_in_chroot init "$REPO"
-    run skfl_in_chroot package new my-setup
+    run skfl_in_chroot package init my-setup
     [ "$status" -eq 0 ]
     run chroot "$CHROOT" /bin/sh -c "test -d $REPO/50_packages/my-setup"
     [ "$status" -eq 0 ]
 }
 
-@test "package new fails on duplicate" {
+@test "package init fails on duplicate" {
     skfl_in_chroot init "$REPO"
-    skfl_in_chroot package new my-setup
-    run skfl_in_chroot package new my-setup
+    skfl_in_chroot package init my-setup
+    run skfl_in_chroot package init my-setup
     [ "$status" -ne 0 ]
     [[ "$output" == *"already exists"* ]]
 }
@@ -641,7 +641,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
-    skfl_in_chroot package new my-setup
+    skfl_in_chroot package init my-setup
     run skfl_in_chroot package add my-setup custom/test/skill.md skill.md
     [ "$status" -eq 0 ]
     run chroot "$CHROOT" /bin/sh -c "test -L $REPO/50_packages/my-setup/skill.md"
@@ -652,7 +652,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src/skills && echo '# Skill' > /tmp/src/skills/skill.md"
     skfl_in_chroot source custom test /tmp/src
-    skfl_in_chroot package new my-setup
+    skfl_in_chroot package init my-setup
     run skfl_in_chroot package add my-setup custom/test/skills skills
     [ "$status" -eq 0 ]
     run chroot "$CHROOT" /bin/sh -c "test -L $REPO/50_packages/my-setup/skills"
@@ -663,18 +663,18 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
-    skfl_in_chroot package new my-setup
+    skfl_in_chroot package init my-setup
     skfl_in_chroot package add my-setup custom/test/skill.md skill.md
     run skfl_in_chroot package build my-setup
     [ "$status" -ne 0 ]
 }
 
-@test "package full workflow: new -> add -> build -> install rsync" {
+@test "package full workflow: init -> add -> build -> install rsync" {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
     vet_file_in_chroot custom/test/skill.md
-    skfl_in_chroot package new my-setup
+    skfl_in_chroot package init my-setup
     skfl_in_chroot package add my-setup custom/test/skill.md skills/skill.md
     run skfl_in_chroot package build my-setup
     [ "$status" -eq 0 ]
@@ -701,7 +701,7 @@ teardown() {
         mkdir -p '$REPO/30_patches/custom/test/file.txt.d'
         diff -u $REPO/10_sources/custom/test/file.txt /tmp/patched.txt > '$REPO/30_patches/custom/test/file.txt.d/001-fix.patch' || true
     "
-    skfl_in_chroot package new my-setup
+    skfl_in_chroot package init my-setup
     skfl_in_chroot package add my-setup custom/test/file.txt file.txt
     run skfl_in_chroot package build my-setup
     [ "$status" -eq 0 ]
