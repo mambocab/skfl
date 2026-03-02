@@ -877,6 +877,12 @@ class TestSourcePullParsing:
         assert result.exit_code != 0
         assert "Specify" in result.output
 
+    def test_owner_repo_shorthand_accepted(self, repo):
+        runner = CliRunner()
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(skfl.cli, ["source", "pull", "BenjaminG/ai-skills"])
+        assert result.exit_code == 0
+
     def test_github_shorthand_rejects_missing_slash(self, repo):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["source", "pull", "github", "noslash"])

@@ -683,6 +683,7 @@ def source_pull(source_type_or_url, owner_repo, owner, repo, ref):
 
     \b
     Examples:
+      skfl source pull obra/superpowers
       skfl source pull github obra/superpowers
       skfl source pull https://github.com/obra/superpowers
       skfl source pull --owner obra --repo superpowers
@@ -698,6 +699,13 @@ def source_pull(source_type_or_url, owner_repo, owner, repo, ref):
                     f"Expected OWNER/REPO, got: {owner_repo!r}"
                 )
             owner, repo = owner_repo.split("/", 1)
+        elif "/" in arg and not arg.startswith("http"):
+            # skfl source pull owner/repo
+            if owner_repo:
+                raise click.ClickException(
+                    f"Unexpected argument {owner_repo!r}."
+                )
+            owner, repo = arg.split("/", 1)
         else:
             # Full URL form — owner_repo must be absent
             if owner_repo:
