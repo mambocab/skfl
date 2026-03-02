@@ -1872,6 +1872,31 @@ class TestCompletionHelpers:
         values = {r.value for r in results}
         assert any("hello.md" in v for v in values)
 
+    def test_dash_C_overrides_standard_repos(self, tmp_path, monkeypatch):
+        # Even when find_all_repos() returns repos, -C must scope to its repo only.
+        # Set up a standard ~/.skfl with a 'standard' source file.
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        home_repo = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(home_repo)])
+        std_file = home_repo / skfl.SOURCES_DIR / "custom" / "std" / "standard.md"
+        std_file.parent.mkdir(parents=True, exist_ok=True)
+        std_file.write_text("standard\n")
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+
+        # Set up a separate repo with a 'target' source file.
+        target_repo = tmp_path / "other.skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(target_repo)])
+        tgt_file = target_repo / skfl.SOURCES_DIR / "custom" / "tgt" / "target.md"
+        tgt_file.parent.mkdir(parents=True, exist_ok=True)
+        tgt_file.write_text("target\n")
+
+        ctx = self._make_ctx(target_repo)
+        results = skfl._complete_source_files(ctx, None, "")
+        values = {r.value for r in results}
+        assert any("target.md" in v for v in values)
+        assert not any("standard.md" in v for v in values)
+
 
 # ── completion command ────────────────────────────────────────────────
 

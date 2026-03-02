@@ -465,14 +465,20 @@ def _find_repo_for_completion(ctx=None) -> Path | None:
 def _find_repos_for_completion(ctx=None) -> list[tuple[str, Path]]:
     """Return all repos for multi-repo completions.
 
-    Uses find_all_repos() for the standard locations.  Falls back to the
-    active repo (cwd / $SKFL_REPO / ~/.skfl) when no standard repos exist,
-    so completions work from any directory regardless of setup.
+    If -C was given, scope completions to that repo only.
+    Otherwise uses find_all_repos() for the standard locations, falling back
+    to the active repo (cwd / $SKFL_REPO / ~/.skfl) when none are found.
     """
+    if (c_dir := _c_dir_from_ctx(ctx)) is not None:
+        try:
+            repo = find_repo(start=c_dir)
+            return [(_repo_name(repo), repo)]
+        except click.ClickException:
+            return []
     repos = find_all_repos()
     if repos:
         return repos
-    if (repo := _find_repo_for_completion(ctx)) is not None:
+    if (repo := _find_repo_for_completion()) is not None:
         return [(_repo_name(repo), repo)]
     return []
 
