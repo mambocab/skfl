@@ -30,6 +30,9 @@ SKFL_TOML = "skfl.toml"
 
 REPO_DIRS = [SOURCES_DIR, VETTED_DIR, PATCHES_DIR, STAGED_DIR, PACKAGES_DIR]
 
+# Set by the -C global option; used by find_repo() when no explicit start is given.
+_C_DIR: Path | None = None
+
 
 # ── helpers ────────────────────────────────────────────────────────────
 
@@ -39,7 +42,7 @@ def find_repo(start: Path | None = None) -> Path:
     Falls back to the $SKFL_REPO environment variable when cwd is not inside
     any skfl repository, so commands and completions work from any directory.
     """
-    p = (start or Path.cwd()).resolve()
+    p = (start or _C_DIR or Path.cwd()).resolve()
     while True:
         if (p / SKFL_TOML).is_file():
             return p
@@ -586,8 +589,19 @@ class DefaultCommandGroup(click.Group):
 # ── CLI ────────────────────────────────────────────────────────────────
 
 @click.group()
-def cli():
+@click.option(
+    "-C",
+    "repo_dir",
+    default=None,
+    metavar="PATH",
+    help="Run as if skfl was started in PATH (like git -C).",
+    type=click.Path(exists=True, file_okay=False),
+)
+@click.pass_context
+def cli(ctx, repo_dir):
     """skfl - manage skills for agentic LLM products, skillfully."""
+    global _C_DIR
+    _C_DIR = Path(repo_dir).resolve() if repo_dir else None
 
 
 # ── init ───────────────────────────────────────────────────────────────

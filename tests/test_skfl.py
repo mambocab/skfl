@@ -2285,3 +2285,51 @@ class TestMultiRepoVetStatusCommand:
         result = runner.invoke(skfl.cli, ["vet-status", ".skfl/custom/test/hello.md"])
         assert result.exit_code == 0
         assert "unvetted" in result.output
+
+
+# ── -C global option ───────────────────────────────────────────────────
+
+
+class TestDashC:
+    def test_source_custom_targets_specified_repo(self, tmp_path, tmp_dir):
+        """skfl -C <repo> source custom ... writes to <repo>, not cwd repo."""
+        target_repo = tmp_path / "target"
+        cwd_repo = tmp_dir  # tmp_dir is already chdir'd here
+
+        # Init both repos; cwd is inside cwd_repo
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["init", str(cwd_repo)])
+        runner.invoke(skfl.cli, ["init", str(target_repo)])
+
+        src = tmp_path / "skills"
+        src.mkdir()
+        (src / "skill.md").write_text("# Skill\n")
+
+        result = runner.invoke(
+            skfl.cli, ["-C", str(target_repo), "source", "custom", "my-src", str(src)]
+        )
+        assert result.exit_code == 0, result.output
+
+        # Source must appear in target_repo, not cwd_repo
+        assert (target_repo / skfl.SOURCES_DIR / "custom" / "my-src" / "skill.md").exists()
+        assert not (cwd_repo / skfl.SOURCES_DIR / "custom" / "my-src").exists()
+
+    def test_source_pull_targets_specified_repo(self, tmp_path, tmp_dir):
+        """skfl -C <repo> source pull ... writes to <repo>."""
+        target_repo = tmp_path / "target"
+        cwd_repo = tmp_dir
+
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["init", str(cwd_repo)])
+        runner.invoke(skfl.cli, ["init", str(target_repo)])
+
+        with mock_patch("subprocess.run"):
+            result = runner.invoke(
+                skfl.cli,
+                ["-C", str(target_repo), "source", "pull", "github", "obra/superpowers"],
+            )
+        assert result.exit_code == 0, result.output
+
+        config = skfl.load_config(target_repo)
+        assert "obra/superpowers" in config.get("sources", {})
+        assert "obra/superpowers" not in skfl.load_config(cwd_repo).get("sources", {})
