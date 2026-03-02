@@ -454,14 +454,47 @@ def _c_dir_from_ctx(ctx) -> Path | None:
     return None
 
 
+def _repo_tilde_path(path: Path) -> str:
+    """Return ~/relative path when repo is under HOME, else the absolute string."""
+    try:
+        return "~/" + str(path.relative_to(Path.home()))
+    except ValueError:
+        return str(path)
+
+
+def _next_path_step(values: list[str], incomplete: str) -> list[str]:
+    """Return the next unique path step(s) for directory-by-directory completion.
+
+    Given a list of full paths and the current incomplete prefix, returns only
+    the next path component — a sub-directory name (with trailing '/') when
+    deeper levels exist, or the full path for items already at this level.
+    """
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        if not value.startswith(incomplete):
+            continue
+        suffix = value[len(incomplete):]
+        slash_idx = suffix.find("/")
+        step = value if slash_idx == -1 else incomplete + suffix[: slash_idx + 1]
+        if step not in seen:
+            seen.add(step)
+            result.append(step)
+    return result
+
+
 def _complete_repo_dirs(ctx, param, incomplete):
-    """Shell-completion callback: known skfl repository paths for -C."""
+    """Shell-completion callback: known skfl repository paths for -C.
+
+    Values use ~/relative form for repos under HOME for brevity.
+    """
     from click.shell_completion import CompletionItem
-    return [
-        CompletionItem(str(path), help=name)
-        for name, path in find_all_repos()
-        if str(path).startswith(incomplete)
-    ]
+    items = []
+    for name, path in find_all_repos():
+        tpath = _repo_tilde_path(path)
+        if tpath.startswith(incomplete):
+            items.append(CompletionItem(tpath, help=name))
+    return items
 
 
 def _find_repo_for_completion(ctx=None) -> Path | None:
@@ -499,39 +532,38 @@ def _complete_source_files(ctx, param, incomplete):
     When multiple repos are found each value is prefixed with '<repo_name>/'
     so the user can distinguish which repository a file belongs to.
     When only one repo is active the prefix is omitted for backward compat.
+    Completion proceeds directory-by-directory rather than listing all files.
     """
     from click.shell_completion import CompletionItem
     repos = _find_repos_for_completion(ctx)
     if not repos:
         return []
     multi = len(repos) > 1
-    items = []
-    for name, repo in repos:
-        for rel in all_source_files(repo):
-            value = f"{name}/{rel}" if multi else str(rel)
-            if value.startswith(incomplete):
-                items.append(CompletionItem(value, help=name if multi else None))
-    return items
+    values = [
+        f"{name}/{rel}" if multi else str(rel)
+        for name, repo in repos
+        for rel in all_source_files(repo)
+    ]
+    return [CompletionItem(v) for v in _next_path_step(values, incomplete)]
 
 
 def _complete_patch_files(ctx, param, incomplete):
     """Shell-completion callback: patch files from all repos.
 
     Values are prefixed with '<repo_name>/' when multiple repos are present.
+    Completion proceeds directory-by-directory rather than listing all files.
     """
     from click.shell_completion import CompletionItem
     repos = _find_repos_for_completion(ctx)
     if not repos:
         return []
     multi = len(repos) > 1
-    items = []
-    for name, repo in repos:
-        for p in all_patch_files(repo):
-            rel_str = str(p.relative_to(repo))
-            value = f"{name}/{rel_str}" if multi else rel_str
-            if value.startswith(incomplete):
-                items.append(CompletionItem(value, help=name if multi else None))
-    return items
+    values = [
+        f"{name}/{p.relative_to(repo)}" if multi else str(p.relative_to(repo))
+        for name, repo in repos
+        for p in all_patch_files(repo)
+    ]
+    return [CompletionItem(v) for v in _next_path_step(values, incomplete)]
 
 
 def _complete_profiles(ctx, param, incomplete):
