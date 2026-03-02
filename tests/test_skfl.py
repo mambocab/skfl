@@ -1898,6 +1898,50 @@ class TestCompletionHelpers:
         assert not any("standard.md" in v for v in values)
 
 
+# ── _complete_repo_dirs ───────────────────────────────────────────────
+
+
+class TestCompleteRepoDirs:
+    """Tests for the -C argument completion callback."""
+
+    def test_returns_known_repo_paths(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        repo = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(repo)])
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        results = skfl._complete_repo_dirs(None, None, "")
+        values = {r.value for r in results}
+        assert str(repo) in values
+
+    def test_uses_repo_name_as_help(self, tmp_path, monkeypatch):
+        from click.shell_completion import CompletionItem
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        repo = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(repo)])
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        results = skfl._complete_repo_dirs(None, None, "")
+        assert all(isinstance(r, CompletionItem) for r in results)
+        assert any(r.help for r in results)
+
+    def test_filters_by_prefix(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        repo = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(repo)])
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        results = skfl._complete_repo_dirs(None, None, "/nonexistent")
+        assert results == []
+
+    def test_empty_when_no_repos(self, tmp_path, monkeypatch):
+        fake_home = tmp_path / "empty-home"
+        fake_home.mkdir()
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        results = skfl._complete_repo_dirs(None, None, "")
+        assert results == []
+
+
 # ── completion command ────────────────────────────────────────────────
 
 

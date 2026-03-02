@@ -454,6 +454,16 @@ def _c_dir_from_ctx(ctx) -> Path | None:
     return None
 
 
+def _complete_repo_dirs(ctx, param, incomplete):
+    """Shell-completion callback: known skfl repository paths for -C."""
+    from click.shell_completion import CompletionItem
+    return [
+        CompletionItem(str(path), help=name)
+        for name, path in find_all_repos()
+        if str(path).startswith(incomplete)
+    ]
+
+
 def _find_repo_for_completion(ctx=None) -> Path | None:
     """Return the repo root for a completion callback, or None if not in a repo."""
     try:
@@ -621,6 +631,7 @@ class DefaultCommandGroup(click.Group):
     metavar="PATH",
     help="Run as if skfl was started in PATH (like git -C).",
     type=click.Path(exists=True, file_okay=False),
+    shell_complete=_complete_repo_dirs,
 )
 @click.pass_context
 def cli(ctx, repo_dir):
