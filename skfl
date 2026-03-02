@@ -477,14 +477,69 @@ def _next_path_step(values: list[str], incomplete: str) -> list[str]:
     return result
 
 
+def _path_str_lcp(paths: list[str]) -> str:
+    """Longest common path prefix (ending at a '/') of path strings.
+
+    For a single path returns its parent directory (up to and including
+    the last slash).  For multiple paths returns the longest common prefix
+    that ends on a path-component boundary.  Returns '' when no slash is
+    found in the common prefix.
+    """
+    if not paths:
+        return ""
+    if len(paths) == 1:
+        last = paths[0].rfind("/")
+        return paths[0][: last + 1] if last >= 0 else ""
+    from os.path import commonprefix
+
+    char_lcp = commonprefix(paths)
+    last = char_lcp.rfind("/")
+    return char_lcp[: last + 1] if last >= 0 else ""
+
+
 def _complete_repo_dirs(ctx, param, incomplete):
-    """Shell-completion callback: known skfl repository paths for -C."""
+    """Shell-completion callback: known skfl repository paths for -C.
+
+    Returns short values relative to the longest common path prefix so
+    that the shell menu shows e.g. '.skfl' and '.work.skfl' rather than
+    the full absolute paths.  A sentinel CompletionItem whose value starts
+    with '__lcp__' encodes the prefix for the patched zsh completion script
+    (see _patch_zsh_completion_source); other shells receive full paths.
+    """
     from click.shell_completion import CompletionItem
-    return [
-        CompletionItem(str(path), help=name)
-        for name, path in find_all_repos()
-        if str(path).startswith(incomplete)
+
+    repos = find_all_repos()
+    if not repos:
+        return []
+
+    home = Path.home()
+
+    def tilde(p: Path) -> str:
+        try:
+            return "~/" + str(p.relative_to(home))
+        except ValueError:
+            return str(p)
+
+    # Build (display_str, name, path) triples; tilde-prefix paths under HOME
+    triples = [(tilde(path), name, path) for name, path in repos]
+
+    # Filter by incomplete: accept tilde form OR absolute form so that
+    # both '~/...' and '/abs/...' typed prefixes work correctly.
+    filtered = [
+        (ps, name)
+        for ps, name, path in triples
+        if not incomplete or ps.startswith(incomplete) or str(path).startswith(incomplete)
     ]
+    if not filtered:
+        return []
+
+    lcp = _path_str_lcp([ps for ps, _ in filtered])
+    if lcp:
+        # Sentinel tells the patched zsh script to use 'compadd -W lcp'.
+        return [CompletionItem(f"__lcp__{lcp}")] + [
+            CompletionItem(ps[len(lcp) :], help=name) for ps, name in filtered
+        ]
+    return [CompletionItem(ps, help=name) for ps, name in filtered]
 
 
 def _find_repo_for_completion(ctx=None) -> Path | None:
@@ -1278,6 +1333,84 @@ def package_install_stow(name, target):
 
 # ── completion ─────────────────────────────────────────────────────────
 
+
+def _patch_zsh_completion_source(source: str) -> str:
+    """Patch Click's generated zsh completion to handle __lcp__ sentinels.
+
+    _complete_repo_dirs may include a sentinel CompletionItem whose value
+    starts with '__lcp__' followed by the longest common path prefix.  The
+    patched completion function extracts this prefix and passes it as -W to
+    _describe so that only the short suffix names are displayed while the
+    full path is inserted on selection.
+
+    If the generated source template has changed and the patch cannot be
+    applied, the original source is returned unchanged (with a warning).
+    """
+    old = (
+        "    for type key descr in ${response}; do\n"
+        '        if [[ "$type" == "plain" ]]; then\n'
+        '            if [[ "$descr" == "_" ]]; then\n'
+        '                completions+=("$key")\n'
+        "            else\n"
+        '                completions_with_descriptions+=("$key":"$descr")\n'
+        "            fi\n"
+        '        elif [[ "$type" == "dir" ]]; then\n'
+        "            _path_files -/\n"
+        '        elif [[ "$type" == "file" ]]; then\n'
+        "            _path_files -f\n"
+        "        fi\n"
+        "    done\n"
+        "\n"
+        '    if [ -n "$completions_with_descriptions" ]; then\n'
+        "        _describe -V unsorted completions_with_descriptions -U\n"
+        "    fi\n"
+        "\n"
+        '    if [ -n "$completions" ]; then\n'
+        "        compadd -U -V unsorted -a completions\n"
+        "    fi"
+    )
+    new = (
+        '    local _repo_lcp=""\n'
+        "    for type key descr in ${response}; do\n"
+        '        if [[ "$type" == "plain" && "$key" == __lcp__* ]]; then\n'
+        '            _repo_lcp="${key#__lcp__}"\n'
+        '        elif [[ "$type" == "plain" ]]; then\n'
+        '            if [[ "$descr" == "_" ]]; then\n'
+        '                completions+=("$key")\n'
+        "            else\n"
+        '                completions_with_descriptions+=("$key":"$descr")\n'
+        "            fi\n"
+        '        elif [[ "$type" == "dir" ]]; then\n'
+        "            _path_files -/\n"
+        '        elif [[ "$type" == "file" ]]; then\n'
+        "            _path_files -f\n"
+        "        fi\n"
+        "    done\n"
+        "\n"
+        '    if [ -n "$completions_with_descriptions" ]; then\n'
+        '        if [ -n "$_repo_lcp" ]; then\n'
+        '            _describe -V unsorted completions_with_descriptions -U -W "$_repo_lcp"\n'
+        "        else\n"
+        "            _describe -V unsorted completions_with_descriptions -U\n"
+        "        fi\n"
+        "    fi\n"
+        "\n"
+        '    if [ -n "$completions" ]; then\n'
+        "        compadd -U -V unsorted -a completions\n"
+        "    fi"
+    )
+    patched = source.replace(old, new)
+    if patched == source:
+        import sys
+
+        print(
+            "skfl: warning: could not patch zsh completion source; "
+            "-C completions may show full paths",
+            file=sys.stderr,
+        )
+    return patched
+
+
 @cli.command("completion")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
 def completion(shell):
@@ -1305,8 +1438,12 @@ def completion(shell):
       export SKFL_REPO=~/path/to/your/skfl-repo
     """
     from click.shell_completion import BashComplete, ZshComplete, FishComplete
+
     cls = {"bash": BashComplete, "zsh": ZshComplete, "fish": FishComplete}[shell]
-    click.echo(cls(cli, {}, "skfl", "_SKFL_COMPLETE").source(), nl=False)
+    source = cls(cli, {}, "skfl", "_SKFL_COMPLETE").source()
+    if shell == "zsh":
+        source = _patch_zsh_completion_source(source)
+    click.echo(source, nl=False)
 
 
 # ── top-level shortcuts ───────────────────────────────────────────────
