@@ -108,7 +108,7 @@ class TestFindRepo:
         with mock_patch.dict(os.environ, {"SKFL_REPO": str(repo_with_source)}):
             results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert "custom/" in values
+        assert "custom" in values
 
     def test_default_home_repo_used_when_no_repo_found(self, tmp_path, monkeypatch):
         # When cwd is outside any repo and $SKFL_REPO is unset, ~/.skfl is tried
@@ -156,7 +156,7 @@ class TestFindRepo:
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert "custom/" in values
+        assert "custom" in values
 
 
 # ── init ───────────────────────────────────────────────────────────────
@@ -1618,22 +1618,22 @@ class TestCompletionHelpers:
     # ── _complete_source_files ────────────────────────────────────────
 
     def test_source_files_descends_directory_by_directory(self, repo_with_source):
-        # Empty prefix — only the top-level component is offered.
+        # Empty prefix — only the top-level component is offered (no trailing /).
         results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert values == {"custom/"}
+        assert values == {"custom"}
 
         # One level in — offer the next component only.
         results = skfl._complete_source_files(None, None, "custom/")
         values = {r.value for r in results}
-        assert values == {"custom/test-src/"}
+        assert values == {"custom/test-src"}
 
-        # At the leaf directory — offer files and sub-dirs, not their contents.
+        # At the leaf directory — offer files and sub-dir names, not deep contents.
         results = skfl._complete_source_files(None, None, "custom/test-src/")
         values = {r.value for r in results}
         assert "custom/test-src/hello.md" in values
         assert "custom/test-src/script.py" in values
-        assert "custom/test-src/sub/" in values
+        assert "custom/test-src/sub" in values          # dir without trailing /
         assert "custom/test-src/sub/nested.txt" not in values
 
         # Final descent into sub-dir.
@@ -1697,10 +1697,10 @@ class TestCompletionHelpers:
         rel = Path("custom/test-src/hello.md")
         self._create_patch(repo, rel)
 
-        # Top level only shows 30_patches/.
+        # Top level only shows 30_patches (no trailing /).
         results = skfl._complete_patch_files(None, None, "")
         values = [r.value for r in results]
-        assert values == ["30_patches/"]
+        assert values == ["30_patches"]
 
         # Drilling to the .d directory exposes the patch file.
         pdir_rel = str(skfl.patches_dir_for(repo, rel).relative_to(repo)) + "/"
@@ -1721,17 +1721,17 @@ class TestCompletionHelpers:
         self._create_patch(repo, Path("custom/test-src/hello.md"))
 
         results = skfl._complete_patch_files(None, None, "")
-        assert all(r.value.startswith("30_patches/") for r in results)
+        assert all(r.value.startswith("30_patches") for r in results)
 
     def test_patch_files_filters_by_prefix(self, repo_with_vetted):
         repo = repo_with_vetted
         self._create_patch(repo, Path("custom/test-src/hello.md"), "001-alpha.patch")
         self._create_patch(repo, Path("custom/test-src/script.py"), "001-beta.patch")
 
-        # Prefix narrows to the hello .d directory; drilling in exposes the patch.
+        # Prefix narrows to the hello .d directory name (no trailing /).
         results = skfl._complete_patch_files(None, None, "30_patches/custom/test-src/hello")
         values = [r.value for r in results]
-        assert values == ["30_patches/custom/test-src/hello.md.d/"]
+        assert values == ["30_patches/custom/test-src/hello.md.d"]
 
         alpha_dir = str(skfl.patches_dir_for(repo, Path("custom/test-src/hello.md")).relative_to(repo)) + "/"
         results = skfl._complete_patch_files(None, None, alpha_dir)
@@ -1924,11 +1924,11 @@ class TestCompletionHelpers:
         tgt_file.write_text("target\n")
 
         ctx = self._make_ctx(target_repo)
-        # One level in: target repo has custom/tgt/, home repo has custom/std/.
+        # One level in: target repo has custom/tgt, home repo has custom/std.
         results = skfl._complete_source_files(ctx, None, "custom/")
         values = {r.value for r in results}
-        assert "custom/tgt/" in values
-        assert "custom/std/" not in values
+        assert "custom/tgt" in values
+        assert "custom/std" not in values
 
 
 # ── _complete_repo_dirs ───────────────────────────────────────────────
@@ -1945,8 +1945,7 @@ class TestCompleteRepoDirs:
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         results = skfl._complete_repo_dirs(None, None, "")
         values = {r.value for r in results}
-        # Repos under HOME are returned as ~/relative paths.
-        assert "~/.skfl" in values
+        assert str(repo) in values
 
     def test_uses_repo_name_as_help(self, tmp_path, monkeypatch):
         from click.shell_completion import CompletionItem
@@ -1968,16 +1967,18 @@ class TestCompleteRepoDirs:
         results = skfl._complete_repo_dirs(None, None, "/nonexistent")
         assert results == []
 
-    def test_filters_by_tilde_prefix(self, tmp_path, monkeypatch):
+    def test_filters_by_path_prefix(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         for name in [".skfl", "work.skfl"]:
             CliRunner().invoke(skfl.cli, ["init", str(fake_home / name)])
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
-        results = skfl._complete_repo_dirs(None, None, "~/w")
+        work_repo = str(fake_home / "work.skfl")
+        skfl_repo = str(fake_home / ".skfl")
+        results = skfl._complete_repo_dirs(None, None, str(fake_home / "w"))
         values = {r.value for r in results}
-        assert "~/work.skfl" in values
-        assert "~/.skfl" not in values
+        assert work_repo in values
+        assert skfl_repo not in values
 
     def test_empty_when_no_repos(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "empty-home"
@@ -2302,10 +2303,10 @@ class TestMultiRepoSourceFilesCompletion:
         src.parent.mkdir(parents=True)
         src.write_text("# File\n")
 
-        # Single repo — no repo-name prefix; dir-by-dir from top.
+        # Single repo — no repo-name prefix; dir-by-dir from top (no trailing /).
         results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert values == {"custom/"}
+        assert values == {"custom"}
         assert not any(v.startswith(".skfl/") for v in values)
 
         # Drilling down reaches the file.
@@ -2315,11 +2316,11 @@ class TestMultiRepoSourceFilesCompletion:
 
     def test_multi_repo_adds_prefix(self, tmp_path, monkeypatch, tmp_dir):
         self._make_two_repos_with_files(tmp_path, monkeypatch)
-        # Top level shows both repos as first component.
+        # Top level shows both repos as first component (no trailing /).
         results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert ".skfl/" in values
-        assert "work.skfl/" in values
+        assert ".skfl" in values
+        assert "work.skfl" in values
 
         # Drilling reaches the actual files.
         results = skfl._complete_source_files(None, None, ".skfl/custom/src1/")
@@ -2331,8 +2332,8 @@ class TestMultiRepoSourceFilesCompletion:
         # Filtering by repo prefix excludes the other repo at every level.
         results = skfl._complete_source_files(None, None, ".skfl/")
         values = {r.value for r in results}
-        assert ".skfl/custom/" in values
-        assert not any(v.startswith("work.skfl/") for v in values)
+        assert ".skfl/custom" in values
+        assert not any(v.startswith("work.skfl") for v in values)
 
     def test_multi_repo_help_text_set(self, tmp_path, monkeypatch, tmp_dir):
         self._make_two_repos_with_files(tmp_path, monkeypatch)
@@ -2363,8 +2364,8 @@ class TestMultiRepoSourceFilesCompletion:
         self._make_two_repos_with_files(tmp_path, monkeypatch)
         results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert any(".skfl/" in v for v in values)
-        assert any("work.skfl/" in v for v in values)
+        assert ".skfl" in values
+        assert "work.skfl" in values
 
 
 class TestMultiRepoPatchFilesCompletion:
@@ -2388,8 +2389,8 @@ class TestMultiRepoPatchFilesCompletion:
         self._make_two_repos_with_patches(tmp_path, monkeypatch)
         results = skfl._complete_patch_files(None, None, "")
         values = {r.value for r in results}
-        assert any(v.startswith(".skfl/") for v in values)
-        assert any(v.startswith("work.skfl/") for v in values)
+        assert any(v.startswith(".skfl") for v in values)
+        assert any(v.startswith("work.skfl") for v in values)
 
     def test_single_repo_patch_no_prefix(self, tmp_path, monkeypatch, tmp_dir):
         fake_home = tmp_path / "home"
@@ -2403,8 +2404,8 @@ class TestMultiRepoPatchFilesCompletion:
 
         results = skfl._complete_patch_files(None, None, "")
         values = {r.value for r in results}
-        assert all(v.startswith("30_patches/") for v in values)
-        assert not any(v.startswith(".skfl/") for v in values)
+        assert all(v.startswith("30_patches") for v in values)
+        assert not any(v.startswith(".skfl") for v in values)
 
 
 # ── multi-repo: vet command ───────────────────────────────────────────

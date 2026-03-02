@@ -454,20 +454,14 @@ def _c_dir_from_ctx(ctx) -> Path | None:
     return None
 
 
-def _repo_tilde_path(path: Path) -> str:
-    """Return ~/relative path when repo is under HOME, else the absolute string."""
-    try:
-        return "~/" + str(path.relative_to(Path.home()))
-    except ValueError:
-        return str(path)
-
-
 def _next_path_step(values: list[str], incomplete: str) -> list[str]:
     """Return the next unique path step(s) for directory-by-directory completion.
 
     Given a list of full paths and the current incomplete prefix, returns only
-    the next path component — a sub-directory name (with trailing '/') when
-    deeper levels exist, or the full path for items already at this level.
+    the next path component.  When deeper levels exist the component is the
+    directory name WITHOUT a trailing slash — the user types '/' to descend,
+    which avoids the shell adding a spurious space after the slash.
+    When no deeper levels exist the full path is returned.
     """
     seen: set[str] = set()
     result: list[str] = []
@@ -476,7 +470,7 @@ def _next_path_step(values: list[str], incomplete: str) -> list[str]:
             continue
         suffix = value[len(incomplete):]
         slash_idx = suffix.find("/")
-        step = value if slash_idx == -1 else incomplete + suffix[: slash_idx + 1]
+        step = value if slash_idx == -1 else incomplete + suffix[:slash_idx]
         if step not in seen:
             seen.add(step)
             result.append(step)
@@ -484,17 +478,13 @@ def _next_path_step(values: list[str], incomplete: str) -> list[str]:
 
 
 def _complete_repo_dirs(ctx, param, incomplete):
-    """Shell-completion callback: known skfl repository paths for -C.
-
-    Values use ~/relative form for repos under HOME for brevity.
-    """
+    """Shell-completion callback: known skfl repository paths for -C."""
     from click.shell_completion import CompletionItem
-    items = []
-    for name, path in find_all_repos():
-        tpath = _repo_tilde_path(path)
-        if tpath.startswith(incomplete):
-            items.append(CompletionItem(tpath, help=name))
-    return items
+    return [
+        CompletionItem(str(path), help=name)
+        for name, path in find_all_repos()
+        if str(path).startswith(incomplete)
+    ]
 
 
 def _find_repo_for_completion(ctx=None) -> Path | None:
