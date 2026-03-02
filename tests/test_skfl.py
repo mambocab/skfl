@@ -1823,6 +1823,55 @@ class TestCompletionHelpers:
         results = skfl._complete_packages(None, None, "")
         assert all(isinstance(r, CompletionItem) for r in results)
 
+    # ── -C context ────────────────────────────────────────────────────
+
+    def _make_ctx(self, repo_dir):
+        """Return a minimal mock Click context with repo_dir in params."""
+        class FakeCtx:
+            parent = None
+            params = {"repo_dir": str(repo_dir)}
+        return FakeCtx()
+
+    def test_source_files_respects_dash_C(self, repo_with_source, tmp_dir):
+        # cwd is tmp_dir (no repo), but ctx carries -C pointing at the repo
+        ctx = self._make_ctx(repo_with_source)
+        results = skfl._complete_source_files(ctx, None, "")
+        values = {r.value for r in results}
+        assert any("hello.md" in v for v in values)
+
+    def test_patch_files_respects_dash_C(self, repo_with_vetted, tmp_dir):
+        ctx = self._make_ctx(repo_with_vetted)
+        # Just verify it doesn't raise and returns a list
+        results = skfl._complete_patch_files(ctx, None, "")
+        assert isinstance(results, list)
+
+    def test_profiles_respects_dash_C(self, repo_with_source, tmp_dir):
+        profiles_dir = repo_with_source / skfl.PATCHES_DIR / "_profiles" / "work"
+        profiles_dir.mkdir(parents=True, exist_ok=True)
+        ctx = self._make_ctx(repo_with_source)
+        results = skfl._complete_profiles(ctx, None, "")
+        values = {r.value for r in results}
+        assert "work" in values
+
+    def test_packages_respects_dash_C(self, repo, tmp_dir):
+        (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        ctx = self._make_ctx(repo)
+        results = skfl._complete_packages(ctx, None, "")
+        values = {r.value for r in results}
+        assert "dotfiles" in values
+
+    def test_dash_C_via_parent_context(self, repo_with_source, tmp_dir):
+        # Simulate a subcommand ctx whose parent holds the -C value
+        class ParentCtx:
+            parent = None
+            params = {"repo_dir": str(repo_with_source)}
+        class ChildCtx:
+            parent = ParentCtx()
+            params = {}
+        results = skfl._complete_source_files(ChildCtx(), None, "")
+        values = {r.value for r in results}
+        assert any("hello.md" in v for v in values)
+
 
 # ── completion command ────────────────────────────────────────────────
 

@@ -435,15 +435,34 @@ def do_vet_files(repo: Path, files: list[str]) -> None:
         vet_single_file(repo, rel)
 
 
-def _find_repo_for_completion() -> Path | None:
+def _c_dir_from_ctx(ctx) -> Path | None:
+    """Extract the -C directory from the root Click context, if present.
+
+    During shell completion Click uses resilient_parsing=True and does not
+    invoke the cli() callback, so the _C_DIR global is never set.  Reading
+    the value directly from the context params lets completion callbacks
+    honour -C without relying on the global.
+    """
+    if ctx is None:
+        return None
+    root = ctx
+    while root.parent is not None:
+        root = root.parent
+    repo_dir = root.params.get("repo_dir")
+    if repo_dir:
+        return Path(repo_dir)
+    return None
+
+
+def _find_repo_for_completion(ctx=None) -> Path | None:
     """Return the repo root for a completion callback, or None if not in a repo."""
     try:
-        return find_repo()
+        return find_repo(start=_c_dir_from_ctx(ctx))
     except click.ClickException:
         return None
 
 
-def _find_repos_for_completion() -> list[tuple[str, Path]]:
+def _find_repos_for_completion(ctx=None) -> list[tuple[str, Path]]:
     """Return all repos for multi-repo completions.
 
     Uses find_all_repos() for the standard locations.  Falls back to the
@@ -453,7 +472,7 @@ def _find_repos_for_completion() -> list[tuple[str, Path]]:
     repos = find_all_repos()
     if repos:
         return repos
-    if (repo := _find_repo_for_completion()) is not None:
+    if (repo := _find_repo_for_completion(ctx)) is not None:
         return [(_repo_name(repo), repo)]
     return []
 
@@ -466,7 +485,7 @@ def _complete_source_files(ctx, param, incomplete):
     When only one repo is active the prefix is omitted for backward compat.
     """
     from click.shell_completion import CompletionItem
-    repos = _find_repos_for_completion()
+    repos = _find_repos_for_completion(ctx)
     if not repos:
         return []
     multi = len(repos) > 1
@@ -485,7 +504,7 @@ def _complete_patch_files(ctx, param, incomplete):
     Values are prefixed with '<repo_name>/' when multiple repos are present.
     """
     from click.shell_completion import CompletionItem
-    repos = _find_repos_for_completion()
+    repos = _find_repos_for_completion(ctx)
     if not repos:
         return []
     multi = len(repos) > 1
@@ -502,7 +521,7 @@ def _complete_patch_files(ctx, param, incomplete):
 def _complete_profiles(ctx, param, incomplete):
     """Shell-completion callback: profile names from 30_patches/_profiles/ subdirectories."""
     from click.shell_completion import CompletionItem
-    if (repo := _find_repo_for_completion()) is None:
+    if (repo := _find_repo_for_completion(ctx)) is None:
         return []
     profiles_dir = repo / PATCHES_DIR / "_profiles"
     if not profiles_dir.is_dir():
@@ -517,7 +536,7 @@ def _complete_profiles(ctx, param, incomplete):
 def _complete_packages(ctx, param, incomplete):
     """Shell-completion callback: package names from 50_packages/ subdirectories."""
     from click.shell_completion import CompletionItem
-    if (repo := _find_repo_for_completion()) is None:
+    if (repo := _find_repo_for_completion(ctx)) is None:
         return []
     packages_dir = repo / PACKAGES_DIR
     if not packages_dir.is_dir():
