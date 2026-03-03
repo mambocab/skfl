@@ -1934,73 +1934,24 @@ class TestCompletionHelpers:
 # ── _complete_repo_dirs ───────────────────────────────────────────────
 
 
-class TestPathStrLcp:
-    """Tests for _path_str_lcp — longest common path-component prefix."""
-
-    def test_empty_list(self):
-        assert skfl._path_str_lcp([]) == ""
-
-    def test_single_path_returns_parent_dir(self):
-        assert skfl._path_str_lcp(["~/.skfl"]) == "~/"
-
-    def test_single_nested_path(self):
-        assert skfl._path_str_lcp(["~/.local/.skfl"]) == "~/.local/"
-
-    def test_multiple_same_dir(self):
-        assert skfl._path_str_lcp(["~/.skfl", "~/.work.skfl"]) == "~/"
-
-    def test_multiple_truncates_at_slash(self):
-        # commonprefix would give "~/." but we truncate to last slash → "~/"
-        assert skfl._path_str_lcp(["~/.skfl", "~/.work.skfl"]) == "~/"
-
-    def test_no_common_slash(self):
-        assert skfl._path_str_lcp(["a", "b"]) == ""
-
-
 class TestCompleteRepoDirs:
     """Tests for the -C argument completion callback."""
-
-    def _non_sentinel(self, results):
-        """Return results excluding the __lcp__ sentinel item."""
-        return [r for r in results if not r.value.startswith("__lcp__")]
-
-    def _sentinel(self, results):
-        """Return the __lcp__ sentinel item, or None."""
-        for r in results:
-            if r.value.startswith("__lcp__"):
-                return r
-        return None
 
     def test_returns_known_repo_paths(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
         fake_home.mkdir()
-        repo = fake_home / ".skfl"
-        CliRunner().invoke(skfl.cli, ["init", str(repo)])
+        CliRunner().invoke(skfl.cli, ["init", str(fake_home / ".skfl")])
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         results = skfl._complete_repo_dirs(None, None, "")
-        # Values use short form relative to the LCP; the repo basename should appear
-        non_sentinel = self._non_sentinel(results)
-        assert non_sentinel, "expected at least one non-sentinel result"
-        assert any(str(repo).endswith(r.value) for r in non_sentinel)
-
-    def test_includes_lcp_sentinel(self, tmp_path, monkeypatch):
-        fake_home = tmp_path / "home"
-        fake_home.mkdir()
-        repo = fake_home / ".skfl"
-        CliRunner().invoke(skfl.cli, ["init", str(repo)])
-        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
-        results = skfl._complete_repo_dirs(None, None, "")
-        sentinel = self._sentinel(results)
-        assert sentinel is not None, "expected __lcp__ sentinel item"
-        lcp = sentinel.value[len("__lcp__"):]
-        assert lcp.endswith("/")
+        assert results, "expected at least one result"
+        # CWD is not home, so the tilde form is used
+        assert any(r.value == "~/.skfl" for r in results)
 
     def test_uses_repo_name_as_help(self, tmp_path, monkeypatch):
         from click.shell_completion import CompletionItem
         fake_home = tmp_path / "home"
         fake_home.mkdir()
-        repo = fake_home / ".skfl"
-        CliRunner().invoke(skfl.cli, ["init", str(repo)])
+        CliRunner().invoke(skfl.cli, ["init", str(fake_home / ".skfl")])
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         results = skfl._complete_repo_dirs(None, None, "")
         assert all(isinstance(r, CompletionItem) for r in results)
@@ -2022,32 +1973,87 @@ class TestCompleteRepoDirs:
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         # Use the absolute path prefix (as a user might type before ~/... is established)
         results = skfl._complete_repo_dirs(None, None, str(fake_home / "w"))
-        non_sentinel = self._non_sentinel(results)
-        values = {r.value for r in non_sentinel}
+        values = {r.value for r in results}
         assert any("work" in v for v in values), f"expected work.skfl in {values}"
         assert not any(".skfl" == v or v.endswith("/.skfl") for v in values)
 
-    def test_short_values_relative_to_lcp(self, tmp_path, monkeypatch):
-        """Short values should be relative to the LCP, not full absolute paths."""
+    def test_outside_home_returns_tilde_paths(self, tmp_path, monkeypatch):
+        """When CWD is not home, repos are returned as ~/... paths."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        cwd = tmp_path / "other"
+        cwd.mkdir()
+        for name in [".skfl", ".work.skfl"]:
+            CliRunner().invoke(skfl.cli, ["init", str(fake_home / name)])
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        monkeypatch.setattr(skfl.Path, "cwd", staticmethod(lambda: cwd))
+
+        results = skfl._complete_repo_dirs(None, None, "")
+        values = {r.value for r in results}
+        assert "~/.skfl" in values, f"expected '~/.skfl' in {values}"
+        assert "~/.work.skfl" in values, f"expected '~/.work.skfl' in {values}"
+
+    def test_outside_home_tilde_prefix_filters(self, tmp_path, monkeypatch):
+        """Tilde prefix matches narrow results correctly."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        cwd = tmp_path / "other"
+        cwd.mkdir()
+        for name in [".skfl", ".work.skfl"]:
+            CliRunner().invoke(skfl.cli, ["init", str(fake_home / name)])
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        monkeypatch.setattr(skfl.Path, "cwd", staticmethod(lambda: cwd))
+
+        # "~/." matches both
+        results = skfl._complete_repo_dirs(None, None, "~/.")
+        values = {r.value for r in results}
+        assert "~/.skfl" in values
+        assert "~/.work.skfl" in values
+
+        # "~/.w" matches only .work.skfl
+        results = skfl._complete_repo_dirs(None, None, "~/.w")
+        values = {r.value for r in results}
+        assert "~/.work.skfl" in values, f"expected '~/.work.skfl' in {values}"
+        assert "~/.skfl" not in values
+
+    def test_inside_home_returns_relative_paths(self, tmp_path, monkeypatch):
+        """When CWD is home, repos are returned as relative dot paths."""
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         for name in [".skfl", ".work.skfl"]:
             CliRunner().invoke(skfl.cli, ["init", str(fake_home / name)])
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        monkeypatch.setattr(skfl.Path, "cwd", staticmethod(lambda: fake_home))
+
         results = skfl._complete_repo_dirs(None, None, "")
-        non_sentinel = self._non_sentinel(results)
-        values = {r.value for r in non_sentinel}
-        # Short values should be just the repo names, not full paths
+        values = {r.value for r in results}
+        assert ".skfl" in values, f"expected '.skfl' in {values}"
+        assert ".work.skfl" in values, f"expected '.work.skfl' in {values}"
+        # No tilde form when in home dir
+        assert "~/.skfl" not in values
+        assert "~/.work.skfl" not in values
+
+    def test_inside_home_dot_prefix_filters(self, tmp_path, monkeypatch):
+        """Dot prefix matches both repos when in home dir."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        for name in [".skfl", ".work.skfl"]:
+            CliRunner().invoke(skfl.cli, ["init", str(fake_home / name)])
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        monkeypatch.setattr(skfl.Path, "cwd", staticmethod(lambda: fake_home))
+
+        results = skfl._complete_repo_dirs(None, None, ".")
+        values = {r.value for r in results}
         assert ".skfl" in values
         assert ".work.skfl" in values
 
-    def test_cwd_repos_use_relative_paths(self, tmp_path, monkeypatch):
-        """Repos inside the CWD are returned as relative paths.
+        results = skfl._complete_repo_dirs(None, None, ".w")
+        values = {r.value for r in results}
+        assert ".work.skfl" in values
+        assert ".skfl" not in values
 
-        This is the 'dev-shell' scenario where the repos live in the current
-        working directory, so '.skfl' is both the display name and a valid
-        path for -C.  Typing '.' should match both repos.
-        """
+    def test_cwd_repos_use_relative_paths(self, tmp_path, monkeypatch):
+        """Repos inside the CWD (non-home) are returned as relative paths."""
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         cwd = tmp_path / "work"
@@ -2061,17 +2067,13 @@ class TestCompleteRepoDirs:
             lambda: [(".skfl", cwd / ".skfl"), (".work.skfl", cwd / ".work.skfl")],
         )
 
-        # Empty incomplete — all repos offered as relative paths, no sentinel needed
         results = skfl._complete_repo_dirs(None, None, "")
-        non_sentinel = self._non_sentinel(results)
-        values = {r.value for r in non_sentinel}
+        values = {r.value for r in results}
         assert ".skfl" in values
         assert ".work.skfl" in values
 
-        # Dot prefix — both repos start with '.' so both should be offered
         results = skfl._complete_repo_dirs(None, None, ".")
-        non_sentinel = self._non_sentinel(results)
-        values = {r.value for r in non_sentinel}
+        values = {r.value for r in results}
         assert ".skfl" in values
         assert ".work.skfl" in values
 
@@ -2103,15 +2105,6 @@ class TestCompletionCommand:
         assert result.exit_code == 0
         assert "skfl" in result.output
         assert len(result.output) > 50  # non-trivial script
-
-    def test_zsh_includes_lcp_patch(self, tmp_dir):
-        """The generated zsh script must handle __lcp__ sentinels via -W."""
-        runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["completion", "zsh"])
-        assert result.exit_code == 0
-        assert "_repo_lcp" in result.output
-        assert "__lcp__" in result.output
-        assert '-W "$_repo_lcp"' in result.output
 
     def test_fish_outputs_script(self, tmp_dir):
         runner = CliRunner()
