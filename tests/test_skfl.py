@@ -108,7 +108,7 @@ class TestFindRepo:
         with mock_patch.dict(os.environ, {"SKFL_REPO": str(repo_with_source)}):
             results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert "custom" in values
+        assert "custom/" in values
 
     def test_default_home_repo_used_when_no_repo_found(self, tmp_path, monkeypatch):
         # When cwd is outside any repo and $SKFL_REPO is unset, ~/.skfl is tried
@@ -156,7 +156,7 @@ class TestFindRepo:
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert "custom" in values
+        assert "custom/" in values
 
 
 # ── init ───────────────────────────────────────────────────────────────
@@ -1618,22 +1618,22 @@ class TestCompletionHelpers:
     # ── _complete_source_files ────────────────────────────────────────
 
     def test_source_files_descends_directory_by_directory(self, repo_with_source):
-        # Empty prefix — only the top-level component is offered (no trailing /).
+        # Empty prefix — only the top-level component is offered (with trailing /).
         results = skfl._complete_source_files(None, None, "")
         values = {r.value for r in results}
-        assert values == {"custom"}
+        assert values == {"custom/"}
 
         # One level in — offer the next component only.
         results = skfl._complete_source_files(None, None, "custom/")
         values = {r.value for r in results}
-        assert values == {"custom/test-src"}
+        assert values == {"custom/test-src/"}
 
         # At the leaf directory — offer files and sub-dir names, not deep contents.
         results = skfl._complete_source_files(None, None, "custom/test-src/")
         values = {r.value for r in results}
         assert "custom/test-src/hello.md" in values
         assert "custom/test-src/script.py" in values
-        assert "custom/test-src/sub" in values          # dir without trailing /
+        assert "custom/test-src/sub/" in values         # dir with trailing /
         assert "custom/test-src/sub/nested.txt" not in values
 
         # Final descent into sub-dir.
@@ -1697,10 +1697,10 @@ class TestCompletionHelpers:
         rel = Path("custom/test-src/hello.md")
         self._create_patch(repo, rel)
 
-        # Top level only shows 30_patches (no trailing /).
+        # Top level only shows 30_patches (with trailing /).
         results = skfl._complete_patch_files(None, None, "")
         values = [r.value for r in results]
-        assert values == ["30_patches"]
+        assert values == ["30_patches/"]
 
         # Drilling to the .d directory exposes the patch file.
         pdir_rel = str(skfl.patches_dir_for(repo, rel).relative_to(repo)) + "/"
@@ -1728,10 +1728,10 @@ class TestCompletionHelpers:
         self._create_patch(repo, Path("custom/test-src/hello.md"), "001-alpha.patch")
         self._create_patch(repo, Path("custom/test-src/script.py"), "001-beta.patch")
 
-        # Prefix narrows to the hello .d directory name (no trailing /).
+        # Prefix narrows to the hello .d directory name (with trailing /).
         results = skfl._complete_patch_files(None, None, "30_patches/custom/test-src/hello")
         values = [r.value for r in results]
-        assert values == ["30_patches/custom/test-src/hello.md.d"]
+        assert values == ["30_patches/custom/test-src/hello.md.d/"]
 
         alpha_dir = str(skfl.patches_dir_for(repo, Path("custom/test-src/hello.md")).relative_to(repo)) + "/"
         results = skfl._complete_patch_files(None, None, alpha_dir)
@@ -1927,8 +1927,8 @@ class TestCompletionHelpers:
         # One level in: target repo has custom/tgt, home repo has custom/std.
         results = skfl._complete_source_files(ctx, None, "custom/")
         values = {r.value for r in results}
-        assert "custom/tgt" in values
-        assert "custom/std" not in values
+        assert "custom/tgt/" in values
+        assert "custom/std/" not in values
 
 
 # ── _complete_repo_dirs ───────────────────────────────────────────────

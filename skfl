@@ -413,9 +413,10 @@ def _next_path_step(values: list[str], incomplete: str) -> list[str]:
 
     Given a list of full paths and the current incomplete prefix, returns only
     the next path component.  When deeper levels exist the component is the
-    directory name WITHOUT a trailing slash — the user types '/' to descend,
-    which avoids the shell adding a spurious space after the slash.
-    When no deeper levels exist the full path is returned.
+    directory name WITH a trailing slash — this prevents the shell from
+    appending a space after a unique match, so the user can keep typing (or
+    pressing Tab) to descend further.  When no deeper levels exist the full
+    path is returned.
     """
     seen: set[str] = set()
     result: list[str] = []
@@ -424,7 +425,7 @@ def _next_path_step(values: list[str], incomplete: str) -> list[str]:
             continue
         suffix = value[len(incomplete):]
         slash_idx = suffix.find("/")
-        step = value if slash_idx == -1 else incomplete + suffix[:slash_idx]
+        step = value if slash_idx == -1 else incomplete + suffix[:slash_idx] + "/"
         if step not in seen:
             seen.add(step)
             result.append(step)
