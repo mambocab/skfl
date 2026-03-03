@@ -1940,12 +1940,13 @@ class TestCompleteRepoDirs:
     def test_returns_known_repo_paths(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "home"
         fake_home.mkdir()
-        CliRunner().invoke(skfl.cli, ["init", str(fake_home / ".skfl")])
+        repo = fake_home / ".skfl"
+        CliRunner().invoke(skfl.cli, ["init", str(repo)])
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         results = skfl._complete_repo_dirs(None, None, "")
         assert results, "expected at least one result"
-        # CWD is not home, so the tilde form is used
-        assert any(r.value == "~/.skfl" for r in results)
+        # CWD is not home, so the absolute path is used (no tilde form)
+        assert any(r.value == str(repo) for r in results)
 
     def test_uses_repo_name_as_help(self, tmp_path, monkeypatch):
         from click.shell_completion import CompletionItem
@@ -1977,8 +1978,8 @@ class TestCompleteRepoDirs:
         assert any("work" in v for v in values), f"expected work.skfl in {values}"
         assert not any(".skfl" == v or v.endswith("/.skfl") for v in values)
 
-    def test_outside_home_returns_tilde_paths(self, tmp_path, monkeypatch):
-        """When CWD is not home, repos are returned as ~/... paths."""
+    def test_outside_home_returns_absolute_paths(self, tmp_path, monkeypatch):
+        """When CWD is not home, repos are returned as absolute paths (no tilde)."""
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         cwd = tmp_path / "other"
@@ -1990,11 +1991,12 @@ class TestCompleteRepoDirs:
 
         results = skfl._complete_repo_dirs(None, None, "")
         values = {r.value for r in results}
-        assert "~/.skfl" in values, f"expected '~/.skfl' in {values}"
-        assert "~/.work.skfl" in values, f"expected '~/.work.skfl' in {values}"
+        assert str(fake_home / ".skfl") in values, f"expected absolute path in {values}"
+        assert str(fake_home / ".work.skfl") in values
+        assert not any("~" in v for v in values), "tilde paths must not appear in completions"
 
-    def test_outside_home_tilde_prefix_filters(self, tmp_path, monkeypatch):
-        """Tilde prefix matches narrow results correctly."""
+    def test_outside_home_absolute_prefix_filters(self, tmp_path, monkeypatch):
+        """Absolute path prefix narrows results correctly."""
         fake_home = tmp_path / "home"
         fake_home.mkdir()
         cwd = tmp_path / "other"
@@ -2004,17 +2006,19 @@ class TestCompleteRepoDirs:
         monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
         monkeypatch.setattr(skfl.Path, "cwd", staticmethod(lambda: cwd))
 
-        # "~/." matches both
-        results = skfl._complete_repo_dirs(None, None, "~/.")
+        # Prefix that matches both
+        prefix = str(fake_home) + "/."
+        results = skfl._complete_repo_dirs(None, None, prefix)
         values = {r.value for r in results}
-        assert "~/.skfl" in values
-        assert "~/.work.skfl" in values
+        assert str(fake_home / ".skfl") in values
+        assert str(fake_home / ".work.skfl") in values
 
-        # "~/.w" matches only .work.skfl
-        results = skfl._complete_repo_dirs(None, None, "~/.w")
+        # Prefix that matches only .work.skfl
+        prefix_w = str(fake_home) + "/.w"
+        results = skfl._complete_repo_dirs(None, None, prefix_w)
         values = {r.value for r in results}
-        assert "~/.work.skfl" in values, f"expected '~/.work.skfl' in {values}"
-        assert "~/.skfl" not in values
+        assert str(fake_home / ".work.skfl") in values
+        assert str(fake_home / ".skfl") not in values
 
     def test_inside_home_returns_relative_paths(self, tmp_path, monkeypatch):
         """When CWD is home, repos are returned as relative dot paths."""
@@ -2029,9 +2033,7 @@ class TestCompleteRepoDirs:
         values = {r.value for r in results}
         assert ".skfl" in values, f"expected '.skfl' in {values}"
         assert ".work.skfl" in values, f"expected '.work.skfl' in {values}"
-        # No tilde form when in home dir
-        assert "~/.skfl" not in values
-        assert "~/.work.skfl" not in values
+        assert not any("~" in v for v in values), "tilde paths must not appear"
 
     def test_inside_home_dot_prefix_filters(self, tmp_path, monkeypatch):
         """Dot prefix matches both repos when in home dir."""

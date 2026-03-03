@@ -481,10 +481,10 @@ def _complete_repo_dirs(ctx, param, incomplete):
     """Shell-completion callback: known skfl repository paths for -C.
 
     Returns the shortest usable path for each repo: a CWD-relative path when
-    the repo lives under the current directory (e.g. '.skfl'), a tilde path
-    when it lives under the home directory (e.g. '~/.skfl'), or an absolute
-    path otherwise.  The value is what the user would actually type, so the
-    shell's prefix-matching works correctly at every Tab press.
+    the repo lives under the current directory (e.g. '.skfl'), or an absolute
+    path otherwise (e.g. '/home/user/.skfl').  Tilde paths are intentionally
+    avoided: shells escape the '~' when inserting completions, producing
+    '\\~/.skfl', which is not a valid path for -C.
     """
     from click.shell_completion import CompletionItem
 
@@ -492,25 +492,19 @@ def _complete_repo_dirs(ctx, param, incomplete):
     if not repos:
         return []
 
-    home = Path.home()
     cwd = Path.cwd()
 
     def best_path(p: Path) -> str:
         try:
             return str(p.relative_to(cwd))
         except ValueError:
-            pass
-        try:
-            return "~/" + str(p.relative_to(home))
-        except ValueError:
-            pass
-        return str(p)
+            return str(p)
 
     return [
         CompletionItem(ps, help=name)
         for name, path in repos
         for ps in [best_path(path)]
-        if not incomplete or ps.startswith(incomplete) or str(path).startswith(incomplete)
+        if not incomplete or ps.startswith(incomplete)
     ]
 
 
