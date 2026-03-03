@@ -1160,6 +1160,32 @@ def package_install_stow(name, target):
 # ── completion ─────────────────────────────────────────────────────────
 
 
+def _patch_zsh_completion_source(source: str) -> str:
+    """Patch Click's zsh completion script to suppress trailing space for directory steps.
+
+    Click's generated script uses ``compadd -U -V unsorted -a completions`` for all
+    plain completion items, which appends a space after each one.  For items ending
+    with '/' (directory steps in dir-by-dir path completion) the space is wrong —
+    it prevents the user from pressing Tab again to descend further.
+
+    The patch replaces the single compadd call with two: one with ``-S ''`` (no
+    suffix) for directory steps, and one with the default space suffix for leaf files.
+    """
+    old = "    if [ -n \"$completions\" ]; then\n        compadd -U -V unsorted -a completions\n    fi"
+    new = (
+        "    if [ -n \"$completions\" ]; then\n"
+        "        local -a _skfl_dirs _skfl_files\n"
+        "        for _skfl_c in \"${completions[@]}\"; do\n"
+        "            if [[ \"$_skfl_c\" == */ ]]; then _skfl_dirs+=(\"$_skfl_c\")\n"
+        "            else _skfl_files+=(\"$_skfl_c\"); fi\n"
+        "        done\n"
+        "        (( ${#_skfl_dirs} )) && compadd -S '' -U -V unsorted -a _skfl_dirs\n"
+        "        (( ${#_skfl_files} )) && compadd -U -V unsorted -a _skfl_files\n"
+        "    fi"
+    )
+    return source.replace(old, new)
+
+
 @cli.command("completion")
 @click.argument("shell", type=click.Choice(["bash", "zsh", "fish"]))
 def completion(shell):
@@ -1189,7 +1215,10 @@ def completion(shell):
     from click.shell_completion import BashComplete, ZshComplete, FishComplete
 
     cls = {"bash": BashComplete, "zsh": ZshComplete, "fish": FishComplete}[shell]
-    click.echo(cls(cli, {}, "skfl", "_SKFL_COMPLETE").source(), nl=False)
+    source = cls(cli, {}, "skfl", "_SKFL_COMPLETE").source()
+    if shell == "zsh":
+        source = _patch_zsh_completion_source(source)
+    click.echo(source, nl=False)
 
 
 # ── top-level shortcuts ───────────────────────────────────────────────

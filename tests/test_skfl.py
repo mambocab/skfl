@@ -2108,6 +2108,14 @@ class TestCompletionCommand:
         assert "skfl" in result.output
         assert len(result.output) > 50  # non-trivial script
 
+    def test_zsh_includes_nospace_patch_for_dir_steps(self, tmp_dir):
+        # Directory steps end with '/'; the script must use compadd -S '' for
+        # them so the shell doesn't append a space after the slash.
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["completion", "zsh"])
+        assert result.exit_code == 0
+        assert "compadd -S ''" in result.output
+
     def test_fish_outputs_script(self, tmp_dir):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["completion", "fish"])
