@@ -513,15 +513,22 @@ def _complete_repo_dirs(ctx, param, incomplete):
         return []
 
     home = Path.home()
+    cwd = Path.cwd()
 
-    def tilde(p: Path) -> str:
+    def best_path(p: Path) -> str:
+        """Shortest usable path: relative to CWD first, then tilde for HOME, else absolute."""
+        try:
+            return str(p.relative_to(cwd))
+        except ValueError:
+            pass
         try:
             return "~/" + str(p.relative_to(home))
         except ValueError:
-            return str(p)
+            pass
+        return str(p)
 
-    # Build (display_str, name, path) triples; tilde-prefix paths under HOME
-    triples = [(tilde(path), name, path) for name, path in repos]
+    # Build (display_str, name, path) triples
+    triples = [(best_path(path), name, path) for name, path in repos]
 
     # Filter by incomplete: accept tilde form OR absolute form so that
     # both '~/...' and '/abs/...' typed prefixes work correctly.

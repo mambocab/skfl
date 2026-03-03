@@ -2041,6 +2041,40 @@ class TestCompleteRepoDirs:
         assert ".skfl" in values
         assert ".work.skfl" in values
 
+    def test_cwd_repos_use_relative_paths(self, tmp_path, monkeypatch):
+        """Repos inside the CWD are returned as relative paths.
+
+        This is the 'dev-shell' scenario where the repos live in the current
+        working directory, so '.skfl' is both the display name and a valid
+        path for -C.  Typing '.' should match both repos.
+        """
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+        cwd = tmp_path / "work"
+        for name in [".skfl", ".work.skfl"]:
+            (cwd / name / "skills").mkdir(parents=True)
+        monkeypatch.setattr(skfl.Path, "home", staticmethod(lambda: fake_home))
+        monkeypatch.setattr(skfl.Path, "cwd", staticmethod(lambda: cwd))
+        monkeypatch.setattr(
+            skfl,
+            "find_all_repos",
+            lambda: [(".skfl", cwd / ".skfl"), (".work.skfl", cwd / ".work.skfl")],
+        )
+
+        # Empty incomplete — all repos offered as relative paths, no sentinel needed
+        results = skfl._complete_repo_dirs(None, None, "")
+        non_sentinel = self._non_sentinel(results)
+        values = {r.value for r in non_sentinel}
+        assert ".skfl" in values
+        assert ".work.skfl" in values
+
+        # Dot prefix — both repos start with '.' so both should be offered
+        results = skfl._complete_repo_dirs(None, None, ".")
+        non_sentinel = self._non_sentinel(results)
+        values = {r.value for r in non_sentinel}
+        assert ".skfl" in values
+        assert ".work.skfl" in values
+
     def test_empty_when_no_repos(self, tmp_path, monkeypatch):
         fake_home = tmp_path / "empty-home"
         fake_home.mkdir()
