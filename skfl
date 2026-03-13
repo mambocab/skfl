@@ -224,25 +224,19 @@ def all_source_files(repo: Path) -> list[Path]:
 
 
 def _stage_single_file(
-    repo: Path,
     source_abs: Path,
-    rel: Path,
     staged_path: Path,
-    profile: str | None = None,
+    patch_paths: list[Path],
 ) -> int:
-    """Read, patch, and write one source file to its staged location.
-
-    Returns the number of patches applied.
-    """
+    """Read source, apply patches, write to staged location. Returns patch count."""
     content = source_abs.read_bytes()
-    patches = list_patches_for(repo, rel, profile=profile)
-    if patches:
-        content = apply_patches(content, patches)
+    if patch_paths:
+        content = apply_patches(content, patch_paths)
     staged_path.parent.mkdir(parents=True, exist_ok=True)
     staged_path.write_bytes(content)
     if os.access(source_abs, os.X_OK):
         staged_path.chmod(staged_path.stat().st_mode | 0o111)
-    return len(patches)
+    return len(patch_paths)
 
 
 def all_patch_files(repo: Path) -> list[Path]:
@@ -320,39 +314,45 @@ def resolve_package_files(repo: Path, name: str) -> list[tuple[Path, Path]]:
     return sorted(result, key=lambda t: t[1])
 
 
-def do_build_package(repo: Path, name: str, profile: str | None = None) -> None:
-    """Build a package: resolve symlinks, check vetting, apply patches, stage."""
-    pairs = resolve_package_files(repo, name)
-    if not pairs:
-        raise click.ClickException(f"Package '{name}' has no files (no symlinks found).")
+def do_build_package(repo: Path, name: str) -> None:
+    """Build a package: read manifest, vet sources, apply patches, stage."""
+    entries = read_package_manifest(repo, name)
+    if not entries:
+        raise click.ClickException(f"Package '{name}' has no files.")
 
     sources = repo / SOURCES_DIR
 
-    # Resolve `rel` once per file and validate vetting before touching disk.
-    resolved: list[tuple[Path, Path, Path]] = []  # (source_abs, rel, dest_rel)
-    errors = []
-    for source_abs, dest_rel in pairs:
-        try:
-            rel = source_abs.relative_to(sources)
-        except ValueError:
-            errors.append(f"  {source_abs}: not inside sources directory")
-            continue
+    for entry in entries:
+        rel = Path(entry["source"])
+        dest_rel = Path(entry["dest"])
+        patch_strs = entry.get("patches", [])
+
+        source_abs = sources / rel
+        if not source_abs.is_file():
+            raise click.ClickException(f"Source not found: {rel}")
+
+        # Validate patch files exist before touching disk
+        patch_paths = []
+        for p in patch_strs:
+            patch_path = repo / p
+            if not patch_path.is_file():
+                raise click.ClickException(f"Patch not found: {p}")
+            patch_paths.append(patch_path)
+
+        # Vet check — drop into interactive flow
         status = vet_status_for_file(repo, rel)
         if status in ("unvetted", "modified"):
-            errors.append(f"  {rel}: {status}")
-        else:
-            resolved.append((source_abs, rel, dest_rel))
-    if errors:
-        raise click.ClickException(
-            "Cannot build package — the following files are not vetted:\n"
-            + "\n".join(errors)
-        )
+            if not vet_single_file(repo, rel):
+                raise click.ClickException(
+                    f"Cannot build package: {rel} was not vetted."
+                )
 
-    for source_abs, rel, dest_rel in resolved:
         staged_path = repo / STAGED_DIR / name / dest_rel
-        _stage_single_file(repo, source_abs, rel, staged_path, profile=profile)
+        n = _stage_single_file(source_abs, staged_path, patch_paths)
+        patch_note = f" ({n} patch{'es' if n != 1 else ''} applied)" if n else ""
+        click.echo(f"  staged: {dest_rel}{patch_note}")
 
-    click.echo(f"Built package '{name}': {len(resolved)} file(s) staged to {STAGED_DIR}/{name}/.")
+    click.echo(f"Built package '{name}': {len(entries)} file(s) staged to {STAGED_DIR}/{name}/.")
 
 
 def vet_single_file(repo: Path, rel: Path) -> bool:
@@ -1068,11 +1068,10 @@ def package_show(name):
 
 @package.command("build")
 @click.argument("name", shell_complete=_complete_packages)
-@click.option("--as", "profile", default=None, help="Apply profile-specific patches.", shell_complete=_complete_profiles)
-def package_build(name, profile):
+def package_build(name):
     """Build a package: vet-check, apply patches, stage to 50_staged/<name>/."""
     r = find_repo()
-    do_build_package(r, name, profile=profile)
+    do_build_package(r, name)
 
 
 def _resolve_install_paths(repo: Path, name: str, tool: str, target: str) -> tuple[Path, Path]:

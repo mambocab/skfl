@@ -1092,121 +1092,113 @@ def _vet(repo, rel_str):
 
 
 class TestPackageBuild:
-    def test_package_build_stages_file(self, repo_with_source):
+    def _add_file(self, runner, repo, pkg, source_rel, dest, patches=()):
+        args = ["package", "add", pkg, source_rel, dest]
+        for p in patches:
+            args += ["--with-patch", p]
+        runner.invoke(skfl.cli, args)
+
+    def test_build_no_patches(self, repo_with_vetted):
+        repo = repo_with_vetted
         runner = CliRunner()
-        _vet(repo_with_source, "custom/test-src/hello.md")
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
-        )
-        result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
-        assert result.exit_code == 0
-        staged = repo_with_source / skfl.STAGED_DIR / "my-pkg" / "hello.md"
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        self._add_file(runner, repo, "mypkg", "custom/test-src/hello.md", "skills/hello.md")
+
+        result = runner.invoke(skfl.cli, ["package", "build", "mypkg"])
+        assert result.exit_code == 0, result.output
+
+        staged = repo / skfl.STAGED_DIR / "mypkg" / "skills" / "hello.md"
         assert staged.is_file()
-        assert staged.read_text() == "# Hello\n\nWorld\n"
+        source = repo / skfl.SOURCES_DIR / "custom/test-src/hello.md"
+        assert staged.read_bytes() == source.read_bytes()
 
-    def test_package_build_refuses_unvetted(self, repo_with_source):
+    def test_build_with_patch(self, repo_with_vetted, tmp_path):
+        repo = repo_with_vetted
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
-        )
-        result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
-        assert result.exit_code != 0
-        assert "unvetted" in result.output.lower() or "not vetted" in result.output.lower()
+        rel = Path("custom/test-src/hello.md")
+        original = (repo / skfl.SOURCES_DIR / rel).read_bytes()
+        modified = original.replace(b"World", b"Universe")
 
-    def test_package_build_refuses_modified(self, repo_with_source):
-        runner = CliRunner()
-        _vet(repo_with_source, "custom/test-src/hello.md")
-        (repo_with_source / "10_sources" / "custom" / "test-src" / "hello.md").write_text(
-            "changed\n"
-        )
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
-        )
-        result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
-        assert result.exit_code != 0
-        assert "modified" in result.output.lower()
-
-    def test_package_build_applies_patches(self, repo_with_source, tmp_path):
-        runner = CliRunner()
-        _vet(repo_with_source, "custom/test-src/hello.md")
-        src = repo_with_source / "10_sources" / "custom" / "test-src" / "hello.md"
-        original = src.read_bytes()
-        patched = original + b"\nPatched line\n"
-        patch_dir = repo_with_source / "30_patches" / "custom" / "test-src" / "hello.md.d"
-        patch_dir.mkdir(parents=True)
         orig_f = tmp_path / "orig"
         new_f = tmp_path / "new"
         orig_f.write_bytes(original)
-        new_f.write_bytes(patched)
-        proc = subprocess.run(
-            ["diff", "-u", str(orig_f), str(new_f)], capture_output=True
-        )
-        (patch_dir / "001-append.patch").write_bytes(proc.stdout)
+        new_f.write_bytes(modified)
+        proc = subprocess.run(["diff", "-u", str(orig_f), str(new_f)], capture_output=True)
 
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
-        )
-        result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
-        assert result.exit_code == 0
-        staged = repo_with_source / skfl.STAGED_DIR / "my-pkg" / "hello.md"
-        assert "Patched line" in staged.read_text()
+        pdir = skfl.patches_dir_for(repo, rel)
+        pdir.mkdir(parents=True)
+        patch_file = pdir / "001-universe.patch"
+        patch_file.write_bytes(proc.stdout)
+        patch_rel = str(patch_file.relative_to(repo))
 
-    def test_package_build_expands_directory_symlink(self, repo_with_source):
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        self._add_file(runner, repo, "mypkg", str(rel), "skills/hello.md", patches=[patch_rel])
+
+        result = runner.invoke(skfl.cli, ["package", "build", "mypkg"])
+        assert result.exit_code == 0, result.output
+
+        staged = repo / skfl.STAGED_DIR / "mypkg" / "skills" / "hello.md"
+        assert b"Universe" in staged.read_bytes()
+        assert b"World" not in staged.read_bytes()
+
+    def test_build_same_source_multiple_dests_different_patches(self, repo_with_vetted, tmp_path):
+        repo = repo_with_vetted
         runner = CliRunner()
-        _vet(repo_with_source, "custom/test-src/sub/nested.txt")
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/sub", "mydir"],
-        )
-        result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
-        assert result.exit_code == 0
-        assert (
-            repo_with_source / skfl.STAGED_DIR / "my-pkg" / "mydir" / "nested.txt"
-        ).is_file()
+        rel = Path("custom/test-src/hello.md")
+        original = (repo / skfl.SOURCES_DIR / rel).read_bytes()
 
-    def test_package_build_with_profile(self, repo_with_source, tmp_path):
+        def make_patch(find, replace, name):
+            pdir = skfl.patches_dir_for(repo, rel)
+            pdir.mkdir(parents=True, exist_ok=True)
+            modified = original.replace(find, replace)
+            orig_f = tmp_path / f"{name}.orig"
+            new_f = tmp_path / f"{name}.new"
+            orig_f.write_bytes(original)
+            new_f.write_bytes(modified)
+            proc = subprocess.run(["diff", "-u", str(orig_f), str(new_f)], capture_output=True)
+            p = pdir / f"{name}.patch"
+            p.write_bytes(proc.stdout)
+            return str(p.relative_to(repo))
+
+        p1 = make_patch(b"World", b"Universe", "001-universe")
+        p2 = make_patch(b"World", b"Earth", "002-earth")
+
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        self._add_file(runner, repo, "mypkg", str(rel), "skills/intro.md", patches=[p1])
+        self._add_file(runner, repo, "mypkg", str(rel), "skills/advanced.md", patches=[p2])
+
+        result = runner.invoke(skfl.cli, ["package", "build", "mypkg"])
+        assert result.exit_code == 0, result.output
+
+        intro = (repo / skfl.STAGED_DIR / "mypkg" / "skills" / "intro.md").read_bytes()
+        advanced = (repo / skfl.STAGED_DIR / "mypkg" / "skills" / "advanced.md").read_bytes()
+        assert b"Universe" in intro
+        assert b"Earth" in advanced
+
+    def test_build_unvetted_drops_into_vet_flow(self, repo_with_source):
         runner = CliRunner()
-        _vet(repo_with_source, "custom/test-src/hello.md")
-        src = repo_with_source / "10_sources" / "custom" / "test-src" / "hello.md"
-        original = src.read_bytes()
-        patched = original + b"\nProfile line\n"
-        patch_dir = (
-            repo_with_source
-            / "30_patches"
-            / "_profiles"
-            / "myprofile"
-            / "custom"
-            / "test-src"
-            / "hello.md.d"
-        )
-        patch_dir.mkdir(parents=True)
-        orig_f = tmp_path / "orig"
-        new_f = tmp_path / "new"
-        orig_f.write_bytes(original)
-        new_f.write_bytes(patched)
-        proc = subprocess.run(
-            ["diff", "-u", str(orig_f), str(new_f)], capture_output=True
-        )
-        (patch_dir / "001-profile.patch").write_bytes(proc.stdout)
-
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
         runner.invoke(
             skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
         )
-        result = runner.invoke(skfl.cli, ["package", "build", "my-pkg", "--as", "myprofile"])
-        assert result.exit_code == 0
-        staged = repo_with_source / skfl.STAGED_DIR / "my-pkg" / "hello.md"
-        assert "Profile line" in staged.read_text()
+        result = runner.invoke(skfl.cli, ["package", "build", "mypkg"])
+        assert result.exit_code != 0
+
+    def test_build_missing_patch_file_fails(self, repo_with_vetted):
+        repo = repo_with_vetted
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        # Manually write a manifest with a nonexistent patch
+        pkg_dir = repo / skfl.PACKAGES_DIR / "mypkg"
+        (pkg_dir / "package.toml").write_text(
+            '[[file]]\nsource = "custom/test-src/hello.md"\n'
+            'dest = "skills/hello.md"\n'
+            'patches = ["30_patches/nonexistent.patch"]\n'
+        )
+        result = runner.invoke(skfl.cli, ["package", "build", "mypkg"])
+        assert result.exit_code != 0
+        assert "not found" in result.output
 
 
 # ── package install ────────────────────────────────────────────────────
