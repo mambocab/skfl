@@ -35,9 +35,9 @@ Three functions cover all distinct completion domains:
 
 | Function | Completes | Used by |
 |---|---|---|
-| `_complete_source_files` | Paths in `10_sources/`, repo-relative | `vet`, `patch create/list`, `stage` |
+| `_complete_source_files` | Paths in `10_sources/`, repo-relative | `vet`, `patch create/list` |
 | `_complete_patch_files` | `*.patch` files under `30_patches/`, repo-relative from repo root | `patch remove` |
-| `_complete_profiles` | Directory names under `30_patches/_profiles/` | `stage --as` |
+| `_complete_profiles` | Directory names under `30_patches/_profiles/` | `package build --as` |
 
 A fourth function `_complete_source_names` (source keys from `skfl.toml`) was
 considered but there is currently no command that accepts an existing source
@@ -89,22 +89,12 @@ invalid shell names are rejected with a clear error message.
 
 ---
 
-## Decision 6: `DefaultCommandGroup` and completion for `vet`/`stage`
+## Decision 6: `DefaultCommandGroup` removed with `stage`
 
-`vet` and `stage` use `DefaultCommandGroup`, which routes unrecognised tokens to
-a hidden `_default` command.  This has a known limitation for shell completion:
-
-- `skfl vet <TAB>` completes only `status` (the single visible subcommand).
-- `skfl vet status <TAB>` **does** complete source files (via `vet_status.files`).
-- `skfl vet already/typed.py <TAB>` **also** completes source files: Click's
-  completion resolver calls `DefaultCommandGroup.resolve_command`, which
-  prepends `_default` for non-command tokens, so the `_default.files` callback
-  runs for subsequent arguments.
-
-The gap—no source-file completion for the *first* token after bare `skfl vet`—
-was accepted.  Users can always use `skfl vet status <TAB>` to get full
-completion.  Overriding Click's internal `_resolve_context` to paper over this
-gap would be fragile and disproportionate to the benefit.
+`DefaultCommandGroup` was a custom `click.Group` subclass that routed
+unrecognised tokens to a hidden `_default` command.  It was used solely by the
+`stage` command group, which has since been removed.  The class no longer exists
+in the codebase.
 
 ---
 
@@ -120,9 +110,7 @@ first file token: `skfl vet <TAB>` would show `status` instead of source
 files.
 
 **Change:** `vet` is now a plain `@cli.command` that takes `files` directly.
-`vet-status` is a separate top-level `@cli.command`.  `DefaultCommandGroup` is
-retained only for `stage`, where the `list` subcommand coexists with direct
-file staging.
+`vet-status` is a separate top-level `@cli.command`.  `DefaultCommandGroup` was removed along with the `stage` command.
 
 **Benefits:**
 - `skfl vet <TAB>` now completes source files immediately with no workaround.

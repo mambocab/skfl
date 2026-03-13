@@ -102,8 +102,8 @@ Fails if the package has not been built (i.e. `40_staged/<name>/` does not exist
 - `skfl rsync <target>` (top-level shortcut)
 - `skfl stow <target>` (top-level shortcut)
 
-`skfl stage` is retained as internal machinery and remains a CLI command for
-ad-hoc patch testing, but is no longer an install path.
+`skfl stage` has been removed. The `_stage_single_file` internal helper is
+retained as it is used by `package build`.
 
 ## Full Workflow
 
