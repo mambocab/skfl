@@ -781,12 +781,11 @@ def patch_create(source_file, name):
 
     pdir = patches_dir_for(r, rel)
     existing = list_patches_for(r, rel)
-    next_num = len(existing) + 1
 
     if not name:
         name = click.prompt("Patch name")
     safe_name = name.replace(" ", "-").replace("/", "-")
-    patch_name = f"{next_num:03d}-{safe_name}.patch"
+    patch_name = f"{safe_name}.patch"
 
     base_content = src.read_bytes()
     if existing:
