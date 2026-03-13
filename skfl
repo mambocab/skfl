@@ -864,23 +864,16 @@ def patch_create(source_file, name):
     if not src.is_file():
         raise click.ClickException(f"Source file not found: {src}")
 
-    status = vet_status_for_file(r, rel)
-    if status == "unvetted":
-        raise click.ClickException(
-            f"File {rel} has not been vetted. Run 'skfl vet {rel}' first."
-        )
-    if status == "modified":
-        raise click.ClickException(
-            f"File {rel} has been modified since last vet. "
-            f"Run 'skfl vet {rel}' to review changes."
-        )
+    if vet_status_for_file(r, rel) != "vetted":
+        if not vet_single_file(r, rel):
+            return
 
     pdir = patches_dir_for(r, rel)
     existing = list_patches_for(r, rel)
     next_num = len(existing) + 1
 
     if not name:
-        name = "patch"
+        name = click.prompt("Patch name")
     safe_name = name.replace(" ", "-").replace("/", "-")
     patch_name = f"{next_num:03d}-{safe_name}.patch"
 
