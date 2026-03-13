@@ -36,6 +36,11 @@ trap cleanup EXIT
 BIN="$WORK/.local/bin"
 mkdir -p "$BIN"
 
+# Include the editor specified by $EDITOR, if set.
+if [ -n "${EDITOR:-}" ]; then
+    EXTRA_CMDS+=("$(basename "$EDITOR")")
+fi
+
 for cmd in uv python3 git diff patch less env sh \
            cat cp mv mkdir rm chmod ls wc head tail sort find sed \
            rsync stow glow fzf "${EXTRA_CMDS[@]}"; do
