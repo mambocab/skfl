@@ -954,10 +954,11 @@ def package_new(name):
     """Create a new empty package."""
     r = find_repo()
     pkg_dir = r / PACKAGES_DIR / name
-    if pkg_dir.exists():
+    manifest_path = pkg_dir / "package.toml"
+    if manifest_path.exists():
         raise click.ClickException(f"Package '{name}' already exists.")
-    pkg_dir.mkdir(parents=True)
-    (pkg_dir / "package.toml").write_bytes(b"")
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+    write_package_manifest(r, name, [])
     click.echo(f"Created package '{name}' at {pkg_dir.relative_to(r)}.")
 
 

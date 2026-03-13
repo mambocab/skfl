@@ -887,13 +887,20 @@ class TestListPatchesWithProfile:
 
 
 class TestPackageNew:
-    def test_package_init_creates_directory(self, repo):
+    def test_package_init_creates_manifest(self, repo):
         runner = CliRunner()
         result = runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         assert result.exit_code == 0
-        assert (repo / skfl.PACKAGES_DIR / "my-pkg").is_dir()
+        manifest = repo / skfl.PACKAGES_DIR / "my-pkg" / "package.toml"
+        assert manifest.is_file()
 
-    def test_package_init_fails_on_duplicate(self, repo):
+    def test_package_init_manifest_is_empty(self, repo):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        entries = skfl.read_package_manifest(repo, "my-pkg")
+        assert entries == []
+
+    def test_package_init_duplicate_fails(self, repo):
         runner = CliRunner()
         runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         result = runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
