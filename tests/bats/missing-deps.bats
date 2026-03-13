@@ -78,7 +78,7 @@ remove_from_chroot() {
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
     vet_file_in_chroot custom/test/skill.md
-    skfl_in_chroot package new my-pkg
+    skfl_in_chroot package init my-pkg
     skfl_in_chroot package add my-pkg custom/test/skill.md skill.md
     skfl_in_chroot package build my-pkg
     # Remove rsync

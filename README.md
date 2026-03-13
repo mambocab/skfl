@@ -26,8 +26,8 @@ In the spirit of "read before you run", `skfl` is a single Python file. Download
 
 Those dependencies are:
 
-- [`rsync`](https://rsync.samba.org/) for using `skfl install rsync`/`skfl rsync` to "install" skills to a given location using `rsync` for smart `cp`ing.
-- [GNU Stow](https://www.gnu.org/software/stow/) for using `skfl install stow`/`skfl stow` to "install" skills to a given location using `stow` to use your `skfl` repo as a symlink farm.
+- [`rsync`](https://rsync.samba.org/) for using `skfl package install rsync` to "install" skills to a given location using `rsync` for smart `cp`ing.
+- [GNU Stow](https://www.gnu.org/software/stow/) for using `skfl package install stow` to "install" skills to a given location using `stow` to use your `skfl` repo as a symlink farm.
 - [`glow`](https://github.com/charmbracelet/glow) for use as a markdown-specific pager when vetting skills.
 - [`fzf`](https://github.com/junegunn/fzf) for interactive selection in a number of different workflows.
 
@@ -60,9 +60,8 @@ $ skfl package init my-fave-language
 Add files to packages. You refer to source files by their location in your sources directory, which starts with the source type:
 
 ```
-# Add an entire directory to the top level of the package.
-skfl package add my-fave-language github/owner/repo/skills/lang lang
 # Add an individual file to a directory in the package.
+skfl package add my-fave-language github/owner/repo/skills/lang/SKILL.md lang/SKILL.md
 skfl package add my-fave-language github/owner/repo/skills/conventions/SKILL.md lang-conventions/SKILL.md
 ```
 
@@ -81,9 +80,13 @@ skfl package add my-fave-language github/owner/repo/skills/ticketing-cli/SKILL.m
   --with-patch 30_patches/github/owner/repo/skills/ticketing-cli/SKILL.md.d/002-creating-tickets.patch
 ```
 
-Once you've curated a set of skills you're happy with, you can install it into a repo or your home directory using GNU Stow (to manage files as symlinks) or `rsync` (to copy the files).
+Once you've curated a set of skills you're happy with, build the package and install it into a repo or your home directory using `rsync` (to copy the files) or GNU Stow (to manage files as symlinks).
+
 ```
-...
+skfl package build my-fave-language
+skfl package install rsync my-fave-language ~/.some-target-dir
+# or
+skfl package install stow my-fave-language ~/.some-target-dir
 ```
 
 ### Theory of Operation
@@ -128,17 +131,11 @@ You can update a non-custom source using `skfl source pull` again. `source pull`
 
 `skfl` tracks both the source file and your vetting state for each file. This is the key to making source updates painless.
 
-When you first encounter a file, you vet it by reading it in full -- `skfl` opens the file in a pager (`glow` for Markdown, `less` for everything else) and, once you confirm you've reviewed it, records a snapshot of the file content in `20_vetted/`. The snapshot is a copy of the file, mirroring the source tree structure.
+When you first encounter a file, you vet it by reading it in full -- `skfl` opens the file in a pager (`glow` for Markdown, `less` for everything else) and, once you confirm you've reviewed it, records a hash of the file content in `20_vetted/`, mirroring the source tree structure.
 
-When you update a source with `skfl source pull`, you don't need to re-read every file from scratch. `skfl` compares each updated source file against your vetted snapshot:
+When a source file changes (e.g. after `skfl source pull`), its hash no longer matches the stored vetted hash and it shows as `modified` in `skfl vet-status`. You must open and re-review the full file to re-vet it.
 
-- Files that haven't changed remain vetted. No action needed.
-- Files that have changed are shown to you as a **diff** -- you review only what changed, not the whole file again. Approve the diff and your vetted snapshot is updated to match the new version.
-- New files require full vetting, same as the first time.
-
-This is why `skfl` stores the full vetted snapshot, not just a hash: the vetted copy is the baseline for computing diffs when sources are updated.
-
-Check what needs vetting with `skfl vet status`. Interactively vet files with `skfl vet`.
+Check what needs vetting with `skfl vet-status`. Interactively vet files with `skfl vet`.
 
 #### Patching
 

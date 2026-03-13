@@ -548,8 +548,8 @@ def doctor():
     tools = {
         "python3": ("Python interpreter", True),
         "git": ("Version control", True),
-        "rsync": ("File synchronization (for 'skfl install rsync')", False),
-        "stow": ("Symlink farm manager (for 'skfl install stow')", False),
+        "rsync": ("File synchronization (for 'skfl package install rsync')", False),
+        "stow": ("Symlink farm manager (for 'skfl package install stow')", False),
         "glow": ("Markdown pager (for vetting)", False),
         "fzf": ("Interactive selection", False),
         "diff": ("Diff utility (for vetting and patching)", True),
@@ -1127,23 +1127,6 @@ def completion(shell):
         source = _patch_zsh_completion_source(source)
     click.echo(source, nl=False)
 
-
-# ── top-level shortcuts ───────────────────────────────────────────────
-
-@cli.command("rsync")
-@click.argument("target", type=click.Path())
-@click.pass_context
-def rsync_shortcut(ctx, target):
-    """Shortcut for 'skfl install rsync'."""
-    ctx.invoke(install_rsync, target=target)
-
-
-@cli.command("stow")
-@click.argument("target", type=click.Path())
-@click.pass_context
-def stow_shortcut(ctx, target):
-    """Shortcut for 'skfl install stow'."""
-    ctx.invoke(install_stow, target=target)
 
 
 if __name__ == "__main__":
