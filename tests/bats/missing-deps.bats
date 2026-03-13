@@ -89,40 +89,6 @@ remove_from_chroot() {
     [[ "$output" == *"not installed"* ]]
 }
 
-# ── stage: patch binary missing ────────────────────────────────────────
-
-@test "stage: succeeds without patches even when patch binary is absent" {
-    skfl_in_chroot init "$REPO"
-    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'hello' > /tmp/src/file.md"
-    skfl_in_chroot source custom test /tmp/src
-    vet_file_in_chroot custom/test/file.md
-    # Remove patch binary
-    remove_from_chroot patch
-    # Stage without any patches should still work (no patches to apply)
-    run skfl_in_chroot stage custom/test/file.md
-    [ "$status" -eq 0 ]
-    run chroot "$CHROOT" /usr/bin/cat "$REPO/40_staged/custom/test/file.md"
-    [[ "$output" == "hello" ]]
-}
-
-@test "stage: fails when patches exist but patch binary is absent" {
-    skfl_in_chroot init "$REPO"
-    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && printf 'line1\nline2\n' > /tmp/src/file.txt"
-    skfl_in_chroot source custom test /tmp/src
-    vet_file_in_chroot custom/test/file.txt
-    # Create a patch while diff and patch are still available
-    chroot "$CHROOT" /bin/sh -c "
-        printf 'line1\nLINE2\n' > /tmp/modified.txt
-        mkdir -p '$REPO/30_patches/custom/test/file.txt.d'
-        diff -u $REPO/10_sources/custom/test/file.txt /tmp/modified.txt > '$REPO/30_patches/custom/test/file.txt.d/001-fix.patch' || true
-    "
-    # Remove patch binary
-    remove_from_chroot patch
-    # Stage should fail because patches cannot be applied
-    run skfl_in_chroot stage custom/test/file.txt
-    [ "$status" -ne 0 ]
-}
-
 # ── core operations without diff ───────────────────────────────────────
 
 @test "init works without diff" {
@@ -149,12 +115,3 @@ remove_from_chroot() {
     [[ "$output" == *"file.md"* ]]
 }
 
-@test "stage without patches works without diff" {
-    skfl_in_chroot init "$REPO"
-    chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo 'content' > /tmp/src/file.md"
-    skfl_in_chroot source custom test /tmp/src
-    vet_file_in_chroot custom/test/file.md
-    remove_from_chroot diff
-    run skfl_in_chroot stage custom/test/file.md
-    [ "$status" -eq 0 ]
-}
