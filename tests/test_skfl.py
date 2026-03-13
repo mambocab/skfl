@@ -1706,6 +1706,9 @@ class TestCompletionWiring:
     def test_package_install_stow_name_wired(self):
         assert self._custom_complete(skfl.package_install_stow, "name") is skfl._complete_packages
 
+    def test_package_add_with_patch_wired(self):
+        assert self._custom_complete(skfl.package_add, "patches") is skfl._complete_patch_files
+
 
 # ── multi-repo: find_all_repos ────────────────────────────────────────
 

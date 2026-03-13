@@ -16,11 +16,11 @@ This is a lot of moving parts. `skfl` offers a layered interface onto these step
 
 ### Installation
 
-In the spirit of "read before you run", `skfl` is a single Python file. Download it to your `~/Downloads`, read it, and move it to somewhere in your `$PATH`. I like `~/.local/bin`.
+In the spirit of "read before you run", `skfl` is a single Python file. Download it to your downloads path, read it, and move it to somewhere in your `$PATH`. I like `~/.local/bin`.
 
-#### Runtime Dependencies
+### Runtime Dependencies
 
-It has Python dependencies. If you have Python smarts you can manage a virtualenv yourself if you like, but I recommend you run it as a standalone executable. This requires [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/).
+`skfl` has Python dependencies. If you have Python smarts you can manage a virtualenv yourself if you like, but I recommend you run it as a standalone executable. This requires [installing `uv`](https://docs.astral.sh/uv/getting-started/installation/).
 
 `skfl` will also shell out to other executables. You can check the status of your install by running `skfl doctor` (or `python <path-to-skfl> doctor` if you don't know if you have `uv` installed).
 
@@ -36,6 +36,55 @@ The `rsync` and `stow` subcommands have no fallbacks for these runtime dependenc
 If `glow` is not available, `less` will be used as a pager for vetting skills, same as it's used for non-markdown files.
 
 If `fzf` is not available, commands will fail and recommend non-interactive ways for the user to specify the parameters for the operation.
+
+### Quickstart
+
+Start your repo at the default location of ~/.skfl.
+
+```
+$ skfl init
+```
+
+Pull in your favorite skills.
+
+```
+$ skfl source pull github owner/repo
+```
+
+Create a package of skills that you'll install as a group.
+
+```
+$ skfl package init my-fave-language
+```
+
+Add files to packages. You refer to source files by their location in your sources directory, which starts with the source type:
+
+```
+# Add an entire directory to the top level of the package.
+skfl package add my-fave-language github/owner/repo/skills/lang lang
+# Add an individual file to a directory in the package.
+skfl package add my-fave-language github/owner/repo/skills/conventions/SKILL.md lang-conventions/SKILL.md
+```
+
+`skfl` helps you manage patches on top of source files. (The ability to do this is one of my primary motivations for writing `skfl`; there are some useful skills out there that are too long, so I'd like to be able to split them as shown in this example.)
+
+```
+# Create a patch. `skfl` will drop you into `$EDITOR` to edit the file into your desired state and create the patch for you.
+# Make sure you match the skill's name metadata to the path you intend to put it under!
+skfl patch create --name querying-tickets github/owner/repo/skills/ticketing-cli/SKILL.md
+# `skfl` will interactively request the name for the patch if you don't provide `--name`.
+skfl patch create github/owner/repo/skills/ticketing-cli/SKILL.md
+# You can add multiple versions of the same file to a single package.
+skfl package add my-fave-language github/owner/repo/skills/ticketing-cli/SKILL.md querying-tickets/SKILL.md \
+  --with-patch 30_patches/github/owner/repo/skills/ticketing-cli/SKILL.md.d/001-querying-tickets.patch
+skfl package add my-fave-language github/owner/repo/skills/ticketing-cli/SKILL.md creating-tickets/SKILL.md \
+  --with-patch 30_patches/github/owner/repo/skills/ticketing-cli/SKILL.md.d/002-creating-tickets.patch
+```
+
+Once you've curated a set of skills you're happy with, you can install it into a repo or your home directory using GNU Stow (to manage files as symlinks) or `rsync` (to copy the files).
+```
+...
+```
 
 ### Theory of Operation
 
@@ -61,7 +110,8 @@ Start a repository with `skfl init`. This creates the directory structure `skfl`
     custom/<name>/
   20_vetted/                  # snapshots of files as they were when vetted
   30_patches/                 # your patches on top of source files
-  40_staged/                  # files ready for installation (source + patches)
+  40_packages/                # package manifests
+  50_staged/                  # files ready for installation (source + patches)
 ```
 
 This directory is intended to be managed as a Git repository.
@@ -119,9 +169,8 @@ Packages are named, installable subsets of vetted sources. A package declares wh
 Key commands:
 
 - `skfl package init <name>` — create a new empty package.
-- `skfl package add <name> <source-path> <dest-path>` — add a source file to the package.
-- `skfl package build <name>` — vet-check all files, apply patches, and stage the result to `40_staged/<name>/`.
-- `skfl package build <name> --as <profile>` — build with profile-specific patches applied on top of defaults.
+- `skfl package add <name> <source-path> <dest-path> [--with-patch <patch>]...` — add a source file to the package, optionally applying one or more named patches. `--with-patch` is repeatable.
+- `skfl package build <name>` — vet-check all files, apply patches declared in the manifest, and stage the result to `50_staged/<name>/`.
 
 #### Installation
 
