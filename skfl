@@ -253,6 +253,27 @@ def all_patch_files(repo: Path) -> list[Path]:
     return sorted(patches_root.rglob("*.patch"))
 
 
+def read_package_manifest(repo: Path, name: str) -> list[dict]:
+    """Read 40_packages/<name>/package.toml and return list of file entries."""
+    manifest_path = repo / PACKAGES_DIR / name / "package.toml"
+    if not manifest_path.is_file():
+        raise click.ClickException(f"Package '{name}' not found.")
+    with open(manifest_path, "rb") as f:
+        data = tomllib.load(f)
+    return data.get("file", [])
+
+
+def write_package_manifest(repo: Path, name: str, entries: list[dict]) -> None:
+    """Write file entries to 40_packages/<name>/package.toml."""
+    manifest_path = repo / PACKAGES_DIR / name / "package.toml"
+    data = {"file": [dict(e) for e in entries]}
+    # Remove empty patch lists before writing (patches key is optional)
+    for entry in data["file"]:
+        if not entry.get("patches"):
+            entry.pop("patches", None)
+    manifest_path.write_bytes(tomli_w.dumps(data).encode())
+
+
 def expand_paths(repo: Path, fpaths: list[str]) -> list[str]:
     """Expand any directory arguments into their constituent source files."""
     sources = repo / SOURCES_DIR
@@ -936,6 +957,7 @@ def package_new(name):
     if pkg_dir.exists():
         raise click.ClickException(f"Package '{name}' already exists.")
     pkg_dir.mkdir(parents=True)
+    (pkg_dir / "package.toml").write_bytes(b"")
     click.echo(f"Created package '{name}' at {pkg_dir.relative_to(r)}.")
 
 

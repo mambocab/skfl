@@ -7,6 +7,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch as mock_patch
 
+import click
 import pytest
 from click.testing import CliRunner
 
@@ -1941,3 +1942,53 @@ class TestDashC:
         config = skfl.load_config(target_repo)
         assert "obra/superpowers" in config.get("sources", {})
         assert "obra/superpowers" not in skfl.load_config(cwd_repo).get("sources", {})
+
+
+class TestPackageManifest:
+    def test_read_empty_manifest(self, repo):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        entries = skfl.read_package_manifest(repo, "mypkg")
+        assert entries == []
+
+    def test_read_manifest_with_entries(self, repo):
+        pkg_dir = repo / skfl.PACKAGES_DIR / "mypkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "package.toml").write_text(
+            '[[file]]\nsource = "custom/a.md"\ndest = "skills/a.md"\n'
+        )
+        entries = skfl.read_package_manifest(repo, "mypkg")
+        assert len(entries) == 1
+        assert entries[0]["source"] == "custom/a.md"
+        assert entries[0]["dest"] == "skills/a.md"
+        assert entries[0].get("patches", []) == []
+
+    def test_read_manifest_with_patches(self, repo):
+        pkg_dir = repo / skfl.PACKAGES_DIR / "mypkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "package.toml").write_text(
+            '[[file]]\nsource = "custom/a.md"\ndest = "skills/a.md"\n'
+            'patches = ["30_patches/custom/a.md.d/001.patch"]\n'
+        )
+        entries = skfl.read_package_manifest(repo, "mypkg")
+        assert entries[0]["patches"] == ["30_patches/custom/a.md.d/001.patch"]
+
+    def test_read_missing_package_raises(self, repo):
+        with pytest.raises(click.ClickException):
+            skfl.read_package_manifest(repo, "nonexistent")
+
+    def test_write_then_read_roundtrip(self, repo):
+        pkg_dir = repo / skfl.PACKAGES_DIR / "mypkg"
+        pkg_dir.mkdir(parents=True)
+        (pkg_dir / "package.toml").write_text("")
+        entries = [
+            {"source": "custom/a.md", "dest": "skills/a.md", "patches": ["30_patches/custom/a.md.d/001.patch"]},
+            {"source": "custom/b.md", "dest": "skills/b.md"},
+        ]
+        skfl.write_package_manifest(repo, "mypkg", entries)
+        result = skfl.read_package_manifest(repo, "mypkg")
+        assert len(result) == 2
+        assert result[0]["source"] == "custom/a.md"
+        assert result[0]["patches"] == ["30_patches/custom/a.md.d/001.patch"]
+        assert result[1]["source"] == "custom/b.md"
+        assert result[1].get("patches", []) == []
