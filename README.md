@@ -44,6 +44,39 @@ If `glow` is not available, `less` will be used as a pager for vetting skills, s
 
 If `fzf` is not available, commands will fail and recommend non-interactive ways for the user to specify the parameters for the operation.
 
+### Completions
+
+Shell completions are critical for a good `skfl` experience — they let you tab-complete source file paths, patch files, package names, and repository locations without typing them out by hand.
+
+Generate and install completions once for your shell:
+
+**bash** — run once, then restart your shell:
+```sh
+skfl completion bash > ~/.local/share/bash-completion/completions/skfl
+```
+
+**zsh** — run once, and make sure `~/.zfunc` is in your `fpath` before `compinit`:
+```sh
+skfl completion zsh > ~/.zfunc/_skfl
+```
+Add to `~/.zshrc` (before `compinit`):
+```sh
+fpath=(~/.zfunc $fpath)
+autoload -Uz compinit && compinit
+```
+
+**fish** — run once; completions are loaded automatically:
+```sh
+skfl completion fish > ~/.config/fish/completions/skfl.fish
+```
+
+> Do not eval the completion script on every shell startup — that would re-invoke `skfl` (and `uv`) each time. Generate the file once and let your shell load it.
+
+For completions to work from any directory, `skfl` falls back to `~/.skfl` if it exists. To use a different location, set `$SKFL_REPO`:
+```sh
+export SKFL_REPO=~/path/to/your/skfl-repo
+```
+
 ### Quickstart
 
 Start your repo at the default location of ~/.skfl.
