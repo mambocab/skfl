@@ -970,15 +970,15 @@ def package_list():
     if not pkgs_dir.is_dir():
         click.echo("No packages defined.")
         return
-    packages = [
-        p for p in sorted(pkgs_dir.iterdir())
-        if p.is_dir() and not p.is_symlink() and p.name != ".gitkeep"
-    ]
+    packages = sorted(
+        p.name for p in pkgs_dir.iterdir()
+        if p.is_dir() and (p / "package.toml").is_file()
+    )
     if not packages:
         click.echo("No packages defined.")
         return
-    for pkg in packages:
-        click.echo(f"  {pkg.name}")
+    for name in packages:
+        click.echo(f"  {name}")
 
 
 @package.command("add")
@@ -1037,29 +1037,27 @@ def package_add(name, source_path, dest_path, patches):
 def package_show(name):
     """Show files in a package as a tree."""
     r = find_repo()
-    pairs = resolve_package_files(r, name)
-    if not pairs:
+    entries = read_package_manifest(r, name)
+    if not entries:
         click.echo(f"Package '{name}' has no files.")
         return
 
-    # Build a nested dict tree from dest_rel paths
     tree: dict = {}
-    for _, dest_rel in pairs:
+    for entry in entries:
+        dest_rel = Path(entry["dest"])
         node = tree
         for part in dest_rel.parts[:-1]:
             node = node.setdefault(part, {})
-        node[dest_rel.parts[-1]] = None  # leaf
+        node[dest_rel.parts[-1]] = None
 
     def render(node: dict, prefix: str = "") -> None:
-        entries = sorted(node.keys(), key=lambda k: (node[k] is not None, k))
-        for i, key in enumerate(entries):
-            connector = "└── " if i == len(entries) - 1 else "├── "
+        entries_list = sorted(node.keys(), key=lambda k: (node[k] is not None, k))
+        for i, key in enumerate(entries_list):
+            connector = "└── " if i == len(entries_list) - 1 else "├── "
             child = node[key]
-            if child is None:
-                click.echo(prefix + connector + key)
-            else:
-                click.echo(prefix + connector + key)
-                extension = "    " if i == len(entries) - 1 else "│   "
+            click.echo(prefix + connector + key)
+            if child is not None:
+                extension = "    " if i == len(entries_list) - 1 else "│   "
                 render(child, prefix + extension)
 
     click.echo(name)

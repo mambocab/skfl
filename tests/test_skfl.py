@@ -925,6 +925,36 @@ class TestPackageList:
         assert "beta" in result.output
 
 
+# ── package show ───────────────────────────────────────────────────────
+
+
+class TestPackageShow:
+    def test_show_empty_package(self, repo):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        result = runner.invoke(skfl.cli, ["package", "show", "mypkg"])
+        assert result.exit_code == 0
+        assert "no files" in result.output
+
+    def test_show_renders_tree(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "add", "mypkg",
+                                  "custom/test-src/hello.md", "skills/hello.md"])
+        runner.invoke(skfl.cli, ["package", "add", "mypkg",
+                                  "custom/test-src/script.py", "scripts/helper.py"])
+        result = runner.invoke(skfl.cli, ["package", "show", "mypkg"])
+        assert result.exit_code == 0
+        assert "mypkg" in result.output
+        assert "hello.md" in result.output
+        assert "helper.py" in result.output
+
+    def test_show_missing_package_fails(self, repo):
+        runner = CliRunner()
+        result = runner.invoke(skfl.cli, ["package", "show", "nope"])
+        assert result.exit_code != 0
+
+
 # ── package add ────────────────────────────────────────────────────────
 
 
