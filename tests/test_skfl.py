@@ -213,6 +213,13 @@ class TestInit:
         runner.invoke(skfl.cli, ["init", str(tmp_dir)])
         assert (tmp_dir / skfl.PACKAGES_DIR / ".gitkeep").is_file()
 
+    def test_repo_dirs_order(self, tmp_path):
+        """Packages (40) must come before staged (50)."""
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["init", str(tmp_path / "repo")])
+        assert skfl.PACKAGES_DIR.startswith("4")
+        assert skfl.STAGED_DIR.startswith("5")
+
 
 # ── config ─────────────────────────────────────────────────────────────
 
@@ -1039,7 +1046,7 @@ class TestPackageBuild:
         )
         result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
         assert result.exit_code == 0
-        staged = repo_with_source / "40_staged" / "my-pkg" / "hello.md"
+        staged = repo_with_source / skfl.STAGED_DIR / "my-pkg" / "hello.md"
         assert staged.is_file()
         assert staged.read_text() == "# Hello\n\nWorld\n"
 
@@ -1093,7 +1100,7 @@ class TestPackageBuild:
         )
         result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
         assert result.exit_code == 0
-        staged = repo_with_source / "40_staged" / "my-pkg" / "hello.md"
+        staged = repo_with_source / skfl.STAGED_DIR / "my-pkg" / "hello.md"
         assert "Patched line" in staged.read_text()
 
     def test_package_build_expands_directory_symlink(self, repo_with_source):
@@ -1107,7 +1114,7 @@ class TestPackageBuild:
         result = runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
         assert result.exit_code == 0
         assert (
-            repo_with_source / "40_staged" / "my-pkg" / "mydir" / "nested.txt"
+            repo_with_source / skfl.STAGED_DIR / "my-pkg" / "mydir" / "nested.txt"
         ).is_file()
 
     def test_package_build_with_profile(self, repo_with_source, tmp_path):
@@ -1142,7 +1149,7 @@ class TestPackageBuild:
         )
         result = runner.invoke(skfl.cli, ["package", "build", "my-pkg", "--as", "myprofile"])
         assert result.exit_code == 0
-        staged = repo_with_source / "40_staged" / "my-pkg" / "hello.md"
+        staged = repo_with_source / skfl.STAGED_DIR / "my-pkg" / "hello.md"
         assert "Profile line" in staged.read_text()
 
 

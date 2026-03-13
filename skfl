@@ -23,12 +23,12 @@ import tomli_w
 SOURCES_DIR = "10_sources"
 VETTED_DIR = "20_vetted"
 PATCHES_DIR = "30_patches"
-STAGED_DIR = "40_staged"
-PACKAGES_DIR = "50_packages"
+PACKAGES_DIR = "40_packages"
+STAGED_DIR = "50_staged"
 
 SKFL_TOML = "skfl.toml"
 
-REPO_DIRS = [SOURCES_DIR, VETTED_DIR, PATCHES_DIR, STAGED_DIR, PACKAGES_DIR]
+REPO_DIRS = [SOURCES_DIR, VETTED_DIR, PATCHES_DIR, PACKAGES_DIR, STAGED_DIR]
 
 # Set by the -C global option; used by find_repo() when no explicit start is given.
 _C_DIR: Path | None = None
@@ -331,7 +331,7 @@ def do_build_package(repo: Path, name: str, profile: str | None = None) -> None:
         staged_path = repo / STAGED_DIR / name / dest_rel
         _stage_single_file(repo, source_abs, rel, staged_path, profile=profile)
 
-    click.echo(f"Built package '{name}': {len(resolved)} file(s) staged to 40_staged/{name}/.")
+    click.echo(f"Built package '{name}': {len(resolved)} file(s) staged to {STAGED_DIR}/{name}/.")
 
 
 def vet_single_file(repo: Path, rel: Path) -> bool:
@@ -511,7 +511,7 @@ def _complete_profiles(ctx, param, incomplete):
 
 
 def _complete_packages(ctx, param, incomplete):
-    """Shell-completion callback: package names from 50_packages/ subdirectories."""
+    """Shell-completion callback: package names from 40_packages/ subdirectories."""
     from click.shell_completion import CompletionItem
     if (repo := _find_repo_for_completion(ctx)) is None:
         return []
@@ -999,11 +999,45 @@ def package_add(name, source_path, dest_path):
     click.echo(f"  added: {dest_path} -> {rel_target}")
 
 
+@package.command("show")
+@click.argument("name", shell_complete=_complete_packages)
+def package_show(name):
+    """Show files in a package as a tree."""
+    r = find_repo()
+    pairs = resolve_package_files(r, name)
+    if not pairs:
+        click.echo(f"Package '{name}' has no files.")
+        return
+
+    # Build a nested dict tree from dest_rel paths
+    tree: dict = {}
+    for _, dest_rel in pairs:
+        node = tree
+        for part in dest_rel.parts[:-1]:
+            node = node.setdefault(part, {})
+        node[dest_rel.parts[-1]] = None  # leaf
+
+    def render(node: dict, prefix: str = "") -> None:
+        entries = sorted(node.keys(), key=lambda k: (node[k] is not None, k))
+        for i, key in enumerate(entries):
+            connector = "└── " if i == len(entries) - 1 else "├── "
+            child = node[key]
+            if child is None:
+                click.echo(prefix + connector + key)
+            else:
+                click.echo(prefix + connector + key)
+                extension = "    " if i == len(entries) - 1 else "│   "
+                render(child, prefix + extension)
+
+    click.echo(name)
+    render(tree)
+
+
 @package.command("build")
 @click.argument("name", shell_complete=_complete_packages)
 @click.option("--as", "profile", default=None, help="Apply profile-specific patches.", shell_complete=_complete_profiles)
 def package_build(name, profile):
-    """Build a package: vet-check, apply patches, stage to 40_staged/<name>/."""
+    """Build a package: vet-check, apply patches, stage to 50_staged/<name>/."""
     r = find_repo()
     do_build_package(r, name, profile=profile)
 
