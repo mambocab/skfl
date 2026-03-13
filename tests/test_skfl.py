@@ -1200,6 +1200,50 @@ class TestPackageInstall:
         assert result.exit_code != 0
         assert "not vetted" in result.output.lower() or "unvetted" in result.output.lower()
 
+    def _setup_pkg(self, runner, repo, source_rel="custom/test-src/hello.md", dest="hello.md"):
+        _vet(repo, source_rel)
+        runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "add", "my-pkg", source_rel, dest])
+        runner.invoke(skfl.cli, ["package", "build", "my-pkg"])
+
+    def test_no_conflict_no_prompt(self, repo_with_source, tmp_path):
+        runner = CliRunner()
+        self._setup_pkg(runner, repo_with_source)
+        target = tmp_path / "target"
+        result = runner.invoke(
+            skfl.cli, ["package", "install", "rsync", "my-pkg", str(target)]
+        )
+        assert result.exit_code == 0
+        assert "Proceed?" not in result.output
+
+    def test_conflict_prompts_and_aborts(self, repo_with_source, tmp_path):
+        runner = CliRunner()
+        self._setup_pkg(runner, repo_with_source)
+        target = tmp_path / "target"
+        target.mkdir()
+        (target / "hello.md").write_text("unmanaged content")
+        result = runner.invoke(
+            skfl.cli, ["package", "install", "rsync", "my-pkg", str(target)],
+            input="n\n",
+        )
+        assert result.exit_code != 0
+        assert "Proceed?" in result.output
+        assert (target / "hello.md").read_text() == "unmanaged content"
+
+    def test_conflict_prompts_and_proceeds(self, repo_with_source, tmp_path):
+        runner = CliRunner()
+        self._setup_pkg(runner, repo_with_source)
+        target = tmp_path / "target"
+        target.mkdir()
+        (target / "hello.md").write_text("unmanaged content")
+        result = runner.invoke(
+            skfl.cli, ["package", "install", "rsync", "my-pkg", str(target)],
+            input="y\n",
+        )
+        assert result.exit_code == 0
+        assert "Proceed?" in result.output
+        assert (target / "hello.md").read_text() == "# Hello\n\nWorld\n"
+
 
 # ── removed commands ───────────────────────────────────────────────────
 

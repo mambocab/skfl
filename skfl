@@ -1042,6 +1042,22 @@ def package_install_rsync(name, target):
     """Install a package using rsync."""
     r = find_repo()
     staged, target_path = _resolve_install_paths(r, name, "rsync", target)
+
+    dry = subprocess.run(
+        ["rsync", "-av", "--dry-run", "--exclude=.gitkeep", str(staged) + "/", str(target_path)],
+        capture_output=True, text=True, check=True,
+    )
+    would_overwrite = [
+        line for line in dry.stdout.splitlines()
+        if line and not line.startswith(("sending ", "sent ", "total "))
+        and (target_path / line).is_file()
+    ]
+    if would_overwrite:
+        click.echo("The following existing files would be overwritten:")
+        for f in would_overwrite:
+            click.echo(f"  {f}")
+        click.confirm("Proceed?", abort=True)
+
     subprocess.run(
         ["rsync", "-av", "--exclude=.gitkeep", str(staged) + "/", str(target_path)],
         check=True,
