@@ -929,76 +929,124 @@ class TestPackageList:
 
 
 class TestPackageAdd:
-    def test_package_add_creates_file_symlink(self, repo_with_source):
+    def test_add_appends_entry(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
         result = runner.invoke(
             skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
         )
-        assert result.exit_code == 0
-        symlink = repo_with_source / skfl.PACKAGES_DIR / "my-pkg" / "hello.md"
-        assert symlink.is_symlink()
-        assert symlink.resolve() == (
-            repo_with_source / "10_sources" / "custom" / "test-src" / "hello.md"
-        ).resolve()
+        assert result.exit_code == 0, result.output
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        assert len(entries) == 1
+        assert entries[0]["source"] == "custom/test-src/hello.md"
+        assert entries[0]["dest"] == "skills/hello.md"
+        assert entries[0].get("patches", []) == []
 
-    def test_package_add_creates_directory_symlink(self, repo_with_source):
+    def test_add_with_patch(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        # Create a dummy patch file
+        pdir = skfl.patches_dir_for(repo_with_source, Path("custom/test-src/hello.md"))
+        pdir.mkdir(parents=True)
+        patch_path = pdir / "001-test.patch"
+        patch_path.write_text("--- a\n+++ b\n")
+        patch_rel = str(patch_path.relative_to(repo_with_source))
+
         result = runner.invoke(
             skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/sub", "subdir"],
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md",
+             "--with-patch", patch_rel],
         )
-        assert result.exit_code == 0
-        symlink = repo_with_source / skfl.PACKAGES_DIR / "my-pkg" / "subdir"
-        assert symlink.is_symlink()
-        assert symlink.resolve() == (
-            repo_with_source / "10_sources" / "custom" / "test-src" / "sub"
-        ).resolve()
+        assert result.exit_code == 0, result.output
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        assert entries[0]["patches"] == [patch_rel]
 
-    def test_package_add_creates_nested_dest(self, repo_with_source):
+    def test_add_multiple_patches(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        result = runner.invoke(
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        pdir = skfl.patches_dir_for(repo_with_source, Path("custom/test-src/hello.md"))
+        pdir.mkdir(parents=True)
+        p1 = pdir / "001-first.patch"
+        p2 = pdir / "002-second.patch"
+        p1.write_text("--- a\n+++ b\n")
+        p2.write_text("--- a\n+++ b\n")
+        rel1 = str(p1.relative_to(repo_with_source))
+        rel2 = str(p2.relative_to(repo_with_source))
+
+        runner.invoke(
             skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "deep/nested/hello.md"],
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md",
+             "--with-patch", rel1, "--with-patch", rel2],
         )
-        assert result.exit_code == 0
-        symlink = repo_with_source / skfl.PACKAGES_DIR / "my-pkg" / "deep" / "nested" / "hello.md"
-        assert symlink.is_symlink()
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        assert entries[0]["patches"] == [rel1, rel2]
 
-    def test_package_add_fails_if_package_missing(self, repo_with_source):
+    def test_add_same_source_twice_different_dests(self, repo_with_source):
         runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/intro.md"],
+        )
         result = runner.invoke(
             skfl.cli,
-            ["package", "add", "no-such-pkg", "custom/test-src/hello.md", "hello.md"],
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/advanced.md"],
+        )
+        assert result.exit_code == 0, result.output
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        assert len(entries) == 2
+
+    def test_add_duplicate_dest_fails(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
+        )
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
+        )
+        assert result.exit_code != 0
+        assert "already exists" in result.output
+
+    def test_add_source_outside_sources_dir_fails(self, repo):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "/etc/passwd", "skills/bad.md"],
+        )
+        assert result.exit_code != 0
+
+    def test_add_missing_source_fails(self, repo):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/nonexistent.md", "skills/x.md"],
+        )
+        assert result.exit_code != 0
+
+    def test_add_missing_patch_fails(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md",
+             "--with-patch", "30_patches/nonexistent.patch"],
         )
         assert result.exit_code != 0
         assert "not found" in result.output
 
-    def test_package_add_fails_if_source_missing(self, repo_with_source):
+    def test_add_to_missing_package_fails(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
         result = runner.invoke(
             skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/nonexistent.md", "x.md"],
+            ["package", "add", "nopkg", "custom/test-src/hello.md", "skills/hello.md"],
         )
         assert result.exit_code != 0
-
-    def test_package_add_fails_if_dest_exists(self, repo_with_source):
-        runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
-        )
-        result = runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/script.py", "hello.md"],
-        )
-        assert result.exit_code != 0
-        assert "already exists" in result.output
 
 
 # ── resolve_package_files ─────────────────────────────────────────────

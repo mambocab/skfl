@@ -985,15 +985,18 @@ def package_list():
 @click.argument("name", shell_complete=_complete_packages)
 @click.argument("source_path", type=click.Path(), shell_complete=_complete_source_files)
 @click.argument("dest_path", type=click.Path())
-def package_add(name, source_path, dest_path):
-    """Add a file or directory to a package as a symlink.
+@click.option("--with-patch", "patches", multiple=True, type=click.Path(),
+              shell_complete=_complete_patch_files,
+              help="Patch to apply to this file (may be repeated, applied in order).")
+def package_add(name, source_path, dest_path, patches):
+    """Add a source file to a package.
 
     SOURCE_PATH is relative to 10_sources/.
-    DEST_PATH is where it appears within the package (and installation target).
+    DEST_PATH is where the file appears at install time.
     """
     r = find_repo()
-    pkg_dir = r / PACKAGES_DIR / name
-    if not pkg_dir.is_dir():
+    manifest_path = r / PACKAGES_DIR / name / "package.toml"
+    if not manifest_path.is_file():
         raise click.ClickException(
             f"Package '{name}' not found. Run 'skfl package init {name}' first."
         )
@@ -1010,16 +1013,23 @@ def package_add(name, source_path, dest_path):
     if not source_abs.exists():
         raise click.ClickException(f"Source not found: {source_abs}")
 
-    symlink_path = pkg_dir / dest_path
-    if symlink_path.exists() or symlink_path.is_symlink():
+    for p in patches:
+        patch_path = r / p if not Path(p).is_absolute() else Path(p)
+        if not patch_path.is_file():
+            raise click.ClickException(f"Patch file not found: {p}")
+
+    entries = read_package_manifest(r, name)
+    if any(e["dest"] == dest_path for e in entries):
         raise click.ClickException(
             f"Destination '{dest_path}' already exists in package '{name}'."
         )
 
-    symlink_path.parent.mkdir(parents=True, exist_ok=True)
-    rel_target = os.path.relpath(source_abs.resolve(), symlink_path.parent.resolve())
-    symlink_path.symlink_to(rel_target)
-    click.echo(f"  added: {dest_path} -> {rel_target}")
+    entry: dict = {"source": str(rel), "dest": dest_path}
+    if patches:
+        entry["patches"] = list(patches)
+    entries.append(entry)
+    write_package_manifest(r, name, entries)
+    click.echo(f"  added: {dest_path} <- {rel}")
 
 
 @package.command("show")
