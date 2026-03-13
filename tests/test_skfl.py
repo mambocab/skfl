@@ -507,6 +507,16 @@ class TestListPatchesFor:
         assert patches[0].name == "001-first.patch"
         assert patches[1].name == "002-second.patch"
 
+    def test_returns_default_patches(self, repo):
+        rel = Path("custom/test-src/hello.md")
+        d = skfl.patches_dir_for(repo, rel)
+        d.mkdir(parents=True)
+        (d / "001-default.patch").write_text("default patch")
+
+        patches = skfl.list_patches_for(repo, rel)
+        assert len(patches) == 1
+        assert patches[0].name == "001-default.patch"
+
 
 # ── apply_patches ─────────────────────────────────────────────────────
 
@@ -823,23 +833,6 @@ class TestResolveToSourceRel:
     def test_outside_sources_raises(self, repo_with_source):
         with pytest.raises(ValueError):
             skfl.resolve_to_source_rel(repo_with_source, "/tmp/outside.txt")
-
-
-class TestListPatchesFor:
-    def test_no_patches_returns_empty(self, repo):
-        rel = Path("custom/test-src/hello.md")
-        patches = skfl.list_patches_for(repo, rel)
-        assert len(patches) == 0
-
-    def test_returns_default_patches(self, repo):
-        rel = Path("custom/test-src/hello.md")
-        d = skfl.patches_dir_for(repo, rel)
-        d.mkdir(parents=True)
-        (d / "001-default.patch").write_text("default patch")
-
-        patches = skfl.list_patches_for(repo, rel)
-        assert len(patches) == 1
-        assert patches[0].name == "001-default.patch"
 
 
 # ── package init / package list ────────────────────────────────────────
