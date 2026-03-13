@@ -1,1 +1,0 @@
-- Add stage arguments so you can stage only specific file or directory

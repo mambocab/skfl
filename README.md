@@ -45,8 +45,8 @@ The core workflow for `skfl` is:
 - You manage a SOURCE or many SOURCES of files to use as skills -- specifying directories of skills you authored or pulling them from various remote sources.
 - Before using files from your sources, `skfl` requires that you VET them by reading them. With your squishy human eyeballs. You don't have to vet every file, but `skfl` will only let you use files that have been vetted.
 - You may optionally maintain PATCHES on top of vetted files. Patches let you customize skills to your own needs without modifying the source files directly, so your customizations survive source updates. You can maintain multiple patches per file; they are applied in order.
-- Once vetted (and optionally patched), files can be STAGED for installation. By staging a file, you're explicitly declaring your intent to use it as a skill. Staging takes the vetted source, applies any patches, and places the result in a staging area ready for installation.
-- Staged files (and directories of staged files) can be INSTALLED directly into different locations. `skfl` can be pointed explicitly at a target directory, but it also comes pre-programmed with the directory structure of a few of the popular agentic LLM products and can, for example, be told to install a Kiro Power or a Claude Agent in the appropriate directory.
+- You may organize vetted files into PACKAGES — named, installable subsets of sources. A package declares which files it contains and where they should be installed. Building a package applies all patches and stages the results ready for installation.
+- Packages can be INSTALLED directly into different locations. `skfl` can be pointed explicitly at a target directory, but it also comes pre-programmed with the directory structure of a few of the popular agentic LLM products and can, for example, be told to install a Kiro Power or a Claude Agent in the appropriate directory.
 
 #### Repository
 
@@ -112,25 +112,23 @@ Key commands:
 
 When a source is updated and re-vetted, `skfl` will attempt to apply your existing patches to the new version of the file. If a patch doesn't apply cleanly, `skfl` will warn you so you can update or remove the patch.
 
-#### Staging
+#### Packages
 
-Staging is where vetting and patching come together into files ready for installation. When you stage a file, `skfl`:
+Packages are named, installable subsets of vetted sources. A package declares which source files it contains and where each file should appear at install time.
 
-1. Confirms the file has been vetted.
-2. Applies any patches for the file, in order.
-3. Places the result in `40_staged/`.
+Key commands:
 
-You can only stage vetted files. Attempt to stage an un-vetted file and `skfl` will prompt you to vet it first.
-
-- `skfl stage <file>` — stage a file or directory of files.
-- `skfl stage list` — show what's currently staged.
+- `skfl package init <name>` — create a new empty package.
+- `skfl package add <name> <source-path> <dest-path>` — add a source file to the package.
+- `skfl package build <name>` — vet-check all files, apply patches, and stage the result to `40_staged/<name>/`.
+- `skfl package build <name> --as <profile>` — build with profile-specific patches applied on top of defaults.
 
 #### Installation
 
-Staged files can be installed to a target directory using one of two strategies:
+Built packages can be installed to a target directory using one of two strategies:
 
-- `skfl install rsync <target>` (or `skfl rsync <target>`) — copies staged files to the target using `rsync`.
-- `skfl install stow <target>` (or `skfl stow <target>`) — uses GNU Stow to create a symlink farm from your staging area to the target.
+- `skfl package install rsync <name> <target>` — copies the built package to the target using `rsync`.
+- `skfl package install stow <name> <target>` — uses GNU Stow to create a symlink farm from the package to the target.
 
 `skfl` knows the directory structures of several popular agentic LLM products and can install skills to the right place automatically.
 
