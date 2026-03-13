@@ -567,19 +567,20 @@ class TestApplyPatches:
 
 class TestPatchCreate:
     def test_requires_vetted_file(self, repo_with_source):
+        """Unvetted file drops into vet flow; aborting exits non-zero without patch."""
         runner = CliRunner()
         result = runner.invoke(
             skfl.cli, ["patch", "create", "custom/test-src/hello.md"]
         )
         assert result.exit_code != 0
-        assert "not been vetted" in result.output
+        assert "unvetted" in result.output
 
     def test_no_changes_no_patch(self, repo_with_vetted):
         runner = CliRunner()
         # Mock editor to not change the file
         with mock_patch.dict(os.environ, {"EDITOR": "true"}):
             result = runner.invoke(
-                skfl.cli, ["patch", "create", "custom/test-src/hello.md"]
+                skfl.cli, ["patch", "create", "custom/test-src/hello.md", "-n", "test"],
             )
         assert result.exit_code == 0
         assert "No changes" in result.output
