@@ -54,7 +54,7 @@ $ skfl source pull github owner/repo
 Create a package of skills that you'll install as a group.
 
 ```
-$ skfl package init my-fave-language
+$ skfl package create my-fave-language
 ```
 
 Add files to packages. You refer to source files by their location in your sources directory, which starts with the source type:
@@ -165,7 +165,7 @@ Packages are named, installable subsets of vetted sources. A package declares wh
 
 Key commands:
 
-- `skfl package init <name>` — create a new empty package.
+- `skfl package create <name>` — create a new empty package.
 - `skfl package add <name> <source-path> <dest-path> [--with-patch <patch>]...` — add a source file to the package, optionally applying one or more named patches. `--with-patch` is repeatable.
 - `skfl package build <name>` — vet-check all files, apply patches declared in the manifest, and stage the result to `50_staged/<name>/`.
 

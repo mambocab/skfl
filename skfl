@@ -894,7 +894,7 @@ def package():
     """Manage packages: named, installable subsets of vetted sources."""
 
 
-@package.command("init")
+@package.command("create")
 @click.argument("name")
 def package_new(name):
     """Create a new empty package."""
@@ -944,7 +944,7 @@ def package_add(name, source_path, dest_path, patches):
     manifest_path = r / PACKAGES_DIR / name / "package.toml"
     if not manifest_path.is_file():
         raise click.ClickException(
-            f"Package '{name}' not found. Run 'skfl package init {name}' first."
+            f"Package '{name}' not found. Run 'skfl package create {name}' first."
         )
 
     sources = r / SOURCES_DIR

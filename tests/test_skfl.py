@@ -835,27 +835,27 @@ class TestResolveToSourceRel:
             skfl.resolve_to_source_rel(repo_with_source, "/tmp/outside.txt")
 
 
-# ── package init / package list ────────────────────────────────────────
+# ── package create / package list ────────────────────────────────────────
 
 
 class TestPackageNew:
     def test_package_init_creates_manifest(self, repo):
         runner = CliRunner()
-        result = runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        result = runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
         assert result.exit_code == 0
         manifest = repo / skfl.PACKAGES_DIR / "my-pkg" / "package.toml"
         assert manifest.is_file()
 
     def test_package_init_manifest_is_empty(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
         entries = skfl.read_package_manifest(repo, "my-pkg")
         assert entries == []
 
     def test_package_init_duplicate_fails(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        result = runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
+        result = runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
         assert result.exit_code != 0
         assert "already exists" in result.output
 
@@ -869,8 +869,8 @@ class TestPackageList:
 
     def test_package_list_shows_packages(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "alpha"])
-        runner.invoke(skfl.cli, ["package", "init", "beta"])
+        runner.invoke(skfl.cli, ["package", "create", "alpha"])
+        runner.invoke(skfl.cli, ["package", "create", "beta"])
         result = runner.invoke(skfl.cli, ["package", "list"])
         assert result.exit_code == 0
         assert "alpha" in result.output
@@ -883,14 +883,14 @@ class TestPackageList:
 class TestPackageShow:
     def test_show_empty_package(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         result = runner.invoke(skfl.cli, ["package", "show", "mypkg"])
         assert result.exit_code == 0
         assert "no files" in result.output
 
     def test_show_renders_tree(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         runner.invoke(skfl.cli, ["package", "add", "mypkg",
                                   "custom/test-src/hello.md", "skills/hello.md"])
         runner.invoke(skfl.cli, ["package", "add", "mypkg",
@@ -913,7 +913,7 @@ class TestPackageShow:
 class TestPackageAdd:
     def test_add_appends_entry(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
@@ -927,7 +927,7 @@ class TestPackageAdd:
 
     def test_add_with_patch(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         # Create a dummy patch file
         pdir = skfl.patches_dir_for(repo_with_source, Path("custom/test-src/hello.md"))
         pdir.mkdir(parents=True)
@@ -946,7 +946,7 @@ class TestPackageAdd:
 
     def test_add_multiple_patches(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         pdir = skfl.patches_dir_for(repo_with_source, Path("custom/test-src/hello.md"))
         pdir.mkdir(parents=True)
         p1 = pdir / "001-first.patch"
@@ -966,7 +966,7 @@ class TestPackageAdd:
 
     def test_add_same_source_twice_different_dests(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/intro.md"],
@@ -981,7 +981,7 @@ class TestPackageAdd:
 
     def test_add_duplicate_dest_fails(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
@@ -995,7 +995,7 @@ class TestPackageAdd:
 
     def test_add_source_outside_sources_dir_fails(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "mypkg", "/etc/passwd", "skills/bad.md"],
@@ -1004,7 +1004,7 @@ class TestPackageAdd:
 
     def test_add_missing_source_fails(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "mypkg", "custom/nonexistent.md", "skills/x.md"],
@@ -1013,7 +1013,7 @@ class TestPackageAdd:
 
     def test_add_missing_patch_fails(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         result = runner.invoke(
             skfl.cli,
             ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md",
@@ -1050,7 +1050,7 @@ class TestPackageBuild:
     def test_build_no_patches(self, repo_with_vetted):
         repo = repo_with_vetted
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         self._add_file(runner, repo, "mypkg", "custom/test-src/hello.md", "skills/hello.md")
 
         result = runner.invoke(skfl.cli, ["package", "build", "mypkg"])
@@ -1080,7 +1080,7 @@ class TestPackageBuild:
         patch_file.write_bytes(proc.stdout)
         patch_rel = str(patch_file.relative_to(repo))
 
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         self._add_file(runner, repo, "mypkg", str(rel), "skills/hello.md", patches=[patch_rel])
 
         result = runner.invoke(skfl.cli, ["package", "build", "mypkg"])
@@ -1112,7 +1112,7 @@ class TestPackageBuild:
         p1 = make_patch(b"World", b"Universe", "001-universe")
         p2 = make_patch(b"World", b"Earth", "002-earth")
 
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         self._add_file(runner, repo, "mypkg", str(rel), "skills/intro.md", patches=[p1])
         self._add_file(runner, repo, "mypkg", str(rel), "skills/advanced.md", patches=[p2])
 
@@ -1126,7 +1126,7 @@ class TestPackageBuild:
 
     def test_build_unvetted_drops_into_vet_flow(self, repo_with_source):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
@@ -1137,7 +1137,7 @@ class TestPackageBuild:
     def test_build_missing_patch_file_fails(self, repo_with_vetted):
         repo = repo_with_vetted
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         # Manually write a manifest with a nonexistent patch
         pkg_dir = repo / skfl.PACKAGES_DIR / "mypkg"
         (pkg_dir / "package.toml").write_text(
@@ -1157,7 +1157,7 @@ class TestPackageInstall:
     def test_package_install_rsync(self, repo_with_source, tmp_path):
         runner = CliRunner()
         _vet(repo_with_source, "custom/test-src/hello.md")
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1174,7 +1174,7 @@ class TestPackageInstall:
     def test_package_install_rsync_builds_on_demand(self, repo_with_source, tmp_path):
         runner = CliRunner()
         _vet(repo_with_source, "custom/test-src/hello.md")
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1189,7 +1189,7 @@ class TestPackageInstall:
 
     def test_package_install_rsync_fails_on_unvetted(self, repo_with_source, tmp_path):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
+        runner.invoke(skfl.cli, ["package", "create", "my-pkg"])
         runner.invoke(
             skfl.cli,
             ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
@@ -1865,7 +1865,7 @@ class TestDashC:
 class TestPackageManifest:
     def test_read_empty_manifest(self, repo):
         runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
         entries = skfl.read_package_manifest(repo, "mypkg")
         assert entries == []
 

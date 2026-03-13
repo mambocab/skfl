@@ -285,18 +285,18 @@ teardown() {
     [ "$status" -eq 0 ]
 }
 
-@test "package init creates directory" {
+@test "package create creates directory" {
     skfl_in_chroot init "$REPO"
-    run skfl_in_chroot package init my-setup
+    run skfl_in_chroot package create my-setup
     [ "$status" -eq 0 ]
     run chroot "$CHROOT" /bin/sh -c "test -d $REPO/40_packages/my-setup"
     [ "$status" -eq 0 ]
 }
 
-@test "package init fails on duplicate" {
+@test "package create fails on duplicate" {
     skfl_in_chroot init "$REPO"
-    skfl_in_chroot package init my-setup
-    run skfl_in_chroot package init my-setup
+    skfl_in_chroot package create my-setup
+    run skfl_in_chroot package create my-setup
     [ "$status" -ne 0 ]
     [[ "$output" == *"already exists"* ]]
 }
@@ -305,7 +305,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
-    skfl_in_chroot package init my-setup
+    skfl_in_chroot package create my-setup
     run skfl_in_chroot package add my-setup custom/test/skill.md skill.md
     [ "$status" -eq 0 ]
     run chroot "$CHROOT" /usr/bin/cat "$REPO/40_packages/my-setup/package.toml"
@@ -317,7 +317,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md && echo '# B' > /tmp/src/other.md"
     skfl_in_chroot source custom test /tmp/src
-    skfl_in_chroot package init my-setup
+    skfl_in_chroot package create my-setup
     skfl_in_chroot package add my-setup custom/test/skill.md skill.md
     run skfl_in_chroot package add my-setup custom/test/other.md skill.md
     [ "$status" -ne 0 ]
@@ -328,7 +328,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src/subdir && echo '# Skill' > /tmp/src/subdir/skill.md"
     skfl_in_chroot source custom test /tmp/src
-    skfl_in_chroot package init my-setup
+    skfl_in_chroot package create my-setup
     run skfl_in_chroot package add my-setup custom/test/subdir subdir
     [ "$status" -ne 0 ]
 }
@@ -337,7 +337,7 @@ teardown() {
     skfl_in_chroot init "$REPO"
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
-    skfl_in_chroot package init my-setup
+    skfl_in_chroot package create my-setup
     skfl_in_chroot package add my-setup custom/test/skill.md skill.md
     run skfl_in_chroot package build my-setup
     [ "$status" -ne 0 ]
@@ -348,7 +348,7 @@ teardown() {
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/src && echo '# Skill' > /tmp/src/skill.md"
     skfl_in_chroot source custom test /tmp/src
     vet_file_in_chroot custom/test/skill.md
-    skfl_in_chroot package init my-setup
+    skfl_in_chroot package create my-setup
     skfl_in_chroot package add my-setup custom/test/skill.md skills/skill.md
     # Install without explicit build — should build on demand
     chroot "$CHROOT" /bin/sh -c "mkdir -p /tmp/target"
@@ -369,7 +369,7 @@ teardown() {
         mkdir -p '$REPO/30_patches/custom/test/file.txt.d'
         diff -u $REPO/10_sources/custom/test/file.txt /tmp/patched.txt > '$REPO/30_patches/custom/test/file.txt.d/001-fix.patch' || true
     "
-    skfl_in_chroot package init my-setup
+    skfl_in_chroot package create my-setup
     skfl_in_chroot package add my-setup custom/test/file.txt file.txt \
         --with-patch 30_patches/custom/test/file.txt.d/001-fix.patch
     run skfl_in_chroot package build my-setup
