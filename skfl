@@ -139,24 +139,12 @@ def patches_dir_for(repo: Path, rel: Path) -> Path:
     return Path(str(repo / PATCHES_DIR / rel) + ".d")
 
 
-def profile_patches_dir_for(repo: Path, profile: str, rel: Path) -> Path:
-    """Return the profile-specific patches .d directory."""
-    return Path(str(repo / PATCHES_DIR / "_profiles" / profile / rel) + ".d")
-
-
-def list_patches_for(repo: Path, rel: Path, profile: str | None = None) -> list[Path]:
-    """List patches for a file. Default patches are always included.
-    If a profile is given, profile-specific patches are appended after defaults."""
+def list_patches_for(repo: Path, rel: Path) -> list[Path]:
+    """List patches for a source file (files in its .d directory, sorted)."""
     patches = []
-    # Default patches (always applied)
     d = patches_dir_for(repo, rel)
     if d.is_dir():
         patches.extend(sorted(p for p in d.iterdir() if p.suffix == ".patch"))
-    # Profile-specific patches (applied on top of defaults)
-    if profile:
-        pd = profile_patches_dir_for(repo, profile, rel)
-        if pd.is_dir():
-            patches.extend(sorted(p for p in pd.iterdir() if p.suffix == ".patch"))
     return patches
 
 
@@ -286,32 +274,6 @@ def expand_paths(repo: Path, fpaths: list[str]) -> list[str]:
         else:
             result.append(fpath)
     return result
-
-
-def _collect_symlinks(pkg_dir: Path, current: Path, result: list) -> None:
-    """Recursively collect (source_abs, dest_rel) pairs from symlinks in a package dir."""
-    for item in sorted(current.iterdir()):
-        if item.is_symlink():
-            dest_rel = item.relative_to(pkg_dir)
-            target = item.resolve()
-            if target.is_dir():
-                for f in sorted(target.rglob("*")):
-                    if f.is_file() and f.name != ".gitkeep":
-                        result.append((f, dest_rel / f.relative_to(target)))
-            elif target.is_file():
-                result.append((target, dest_rel))
-        elif item.is_dir():
-            _collect_symlinks(pkg_dir, item, result)
-
-
-def resolve_package_files(repo: Path, name: str) -> list[tuple[Path, Path]]:
-    """Return all (source_abs_path, dest_rel_path) pairs for a package's symlinks."""
-    pkg_dir = repo / PACKAGES_DIR / name
-    if not pkg_dir.is_dir():
-        raise click.ClickException(f"Package '{name}' not found.")
-    result: list[tuple[Path, Path]] = []
-    _collect_symlinks(pkg_dir, pkg_dir, result)
-    return sorted(result, key=lambda t: t[1])
 
 
 def do_build_package(repo: Path, name: str) -> None:
@@ -514,21 +476,6 @@ def _complete_patch_files(ctx, param, incomplete):
         return []
     values = [str(p.relative_to(repo)) for p in all_patch_files(repo)]
     return [CompletionItem(v) for v in _next_path_step(values, incomplete)]
-
-
-def _complete_profiles(ctx, param, incomplete):
-    """Shell-completion callback: profile names from 30_patches/_profiles/ subdirectories."""
-    from click.shell_completion import CompletionItem
-    if (repo := _find_repo_for_completion(ctx)) is None:
-        return []
-    profiles_dir = repo / PATCHES_DIR / "_profiles"
-    if not profiles_dir.is_dir():
-        return []
-    return [
-        CompletionItem(p.name)
-        for p in sorted(profiles_dir.iterdir())
-        if p.is_dir() and p.name.startswith(incomplete)
-    ]
 
 
 def _complete_packages(ctx, param, incomplete):

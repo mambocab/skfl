@@ -825,16 +825,13 @@ class TestResolveToSourceRel:
             skfl.resolve_to_source_rel(repo_with_source, "/tmp/outside.txt")
 
 
-class TestProfilePatchesDirFor:
-    def test_returns_profile_d_directory(self, repo):
+class TestListPatchesFor:
+    def test_no_patches_returns_empty(self, repo):
         rel = Path("custom/test-src/hello.md")
-        d = skfl.profile_patches_dir_for(repo, "claude", rel)
-        assert "_profiles/claude" in str(d)
-        assert str(d).endswith("hello.md.d")
+        patches = skfl.list_patches_for(repo, rel)
+        assert len(patches) == 0
 
-
-class TestListPatchesWithProfile:
-    def test_no_profile_returns_default_only(self, repo):
+    def test_returns_default_patches(self, repo):
         rel = Path("custom/test-src/hello.md")
         d = skfl.patches_dir_for(repo, rel)
         d.mkdir(parents=True)
@@ -843,44 +840,6 @@ class TestListPatchesWithProfile:
         patches = skfl.list_patches_for(repo, rel)
         assert len(patches) == 1
         assert patches[0].name == "001-default.patch"
-
-    def test_profile_includes_default_and_profile(self, repo):
-        rel = Path("custom/test-src/hello.md")
-        # Default patch
-        d = skfl.patches_dir_for(repo, rel)
-        d.mkdir(parents=True)
-        (d / "001-default.patch").write_text("default")
-        # Profile patch
-        pd = skfl.profile_patches_dir_for(repo, "claude", rel)
-        pd.mkdir(parents=True)
-        (pd / "001-claude.patch").write_text("claude")
-
-        patches = skfl.list_patches_for(repo, rel, profile="claude")
-        assert len(patches) == 2
-        names = [p.name for p in patches]
-        assert "001-default.patch" in names
-        assert "001-claude.patch" in names
-        # Default patches come first
-        assert patches[0].name == "001-default.patch"
-
-    def test_profile_only_no_defaults(self, repo):
-        rel = Path("custom/test-src/hello.md")
-        pd = skfl.profile_patches_dir_for(repo, "kiro", rel)
-        pd.mkdir(parents=True)
-        (pd / "001-kiro.patch").write_text("kiro")
-
-        patches = skfl.list_patches_for(repo, rel, profile="kiro")
-        assert len(patches) == 1
-        assert patches[0].name == "001-kiro.patch"
-
-    def test_no_profile_ignores_profile_patches(self, repo):
-        rel = Path("custom/test-src/hello.md")
-        pd = skfl.profile_patches_dir_for(repo, "claude", rel)
-        pd.mkdir(parents=True)
-        (pd / "001-claude.patch").write_text("claude only")
-
-        patches = skfl.list_patches_for(repo, rel)
-        assert len(patches) == 0
 
 
 # ── package init / package list ────────────────────────────────────────
@@ -1077,39 +1036,6 @@ class TestPackageAdd:
             ["package", "add", "nopkg", "custom/test-src/hello.md", "skills/hello.md"],
         )
         assert result.exit_code != 0
-
-
-# ── resolve_package_files ─────────────────────────────────────────────
-
-
-class TestResolvePackageFiles:
-    def test_resolve_package_files_file_symlink(self, repo_with_source):
-        runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/hello.md", "hello.md"],
-        )
-        pairs = skfl.resolve_package_files(repo_with_source, "my-pkg")
-        assert len(pairs) == 1
-        source_abs, dest_rel = pairs[0]
-        assert source_abs.name == "hello.md"
-        assert dest_rel == Path("hello.md")
-
-    def test_resolve_package_files_directory_symlink(self, repo_with_source):
-        runner = CliRunner()
-        runner.invoke(skfl.cli, ["package", "init", "my-pkg"])
-        runner.invoke(
-            skfl.cli,
-            ["package", "add", "my-pkg", "custom/test-src/sub", "subdir"],
-        )
-        pairs = skfl.resolve_package_files(repo_with_source, "my-pkg")
-        dest_rels = [str(d) for _, d in pairs]
-        assert "subdir/nested.txt" in dest_rels
-
-    def test_resolve_package_files_missing_package(self, repo):
-        with pytest.raises(Exception):
-            skfl.resolve_package_files(repo, "no-such-pkg")
 
 
 # ── package build ─────────────────────────────────────────────────────
@@ -1440,82 +1366,6 @@ class TestCompletionHelpers:
         results = skfl._complete_patch_files(None, None, "")
         assert results == []
 
-    def test_patch_files_profile_patches_included(self, repo_with_vetted):
-        repo = repo_with_vetted
-        rel = Path("custom/test-src/hello.md")
-        pdir = skfl.profile_patches_dir_for(repo, "work", rel)
-        pdir.mkdir(parents=True, exist_ok=True)
-        (pdir / "001-work.patch").write_text("--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n")
-
-        # Drilling to the profile .d directory exposes the profile patch.
-        pdir_rel = str(pdir.relative_to(repo)) + "/"
-        results = skfl._complete_patch_files(None, None, pdir_rel)
-        values = [r.value for r in results]
-        assert any("001-work.patch" in v for v in values)
-
-    # ── _complete_profiles ────────────────────────────────────────────
-
-    def _make_profile(self, repo, name):
-        d = repo / skfl.PATCHES_DIR / "_profiles" / name
-        d.mkdir(parents=True, exist_ok=True)
-        return d
-
-    def test_profiles_returns_all_profiles(self, repo_with_source):
-        repo = repo_with_source
-        self._make_profile(repo, "work")
-        self._make_profile(repo, "home")
-
-        results = skfl._complete_profiles(None, None, "")
-        values = {r.value for r in results}
-        assert "work" in values
-        assert "home" in values
-
-    def test_profiles_filters_by_prefix(self, repo_with_source):
-        repo = repo_with_source
-        self._make_profile(repo, "work")
-        self._make_profile(repo, "home")
-
-        results = skfl._complete_profiles(None, None, "w")
-        values = {r.value for r in results}
-        assert "work" in values
-        assert "home" not in values
-
-    def test_profiles_prefix_no_match(self, repo_with_source):
-        repo = repo_with_source
-        self._make_profile(repo, "work")
-
-        results = skfl._complete_profiles(None, None, "xyz")
-        assert results == []
-
-    def test_profiles_empty_prefix_dir(self, repo):
-        # _profiles/ dir doesn't exist
-        results = skfl._complete_profiles(None, None, "")
-        assert results == []
-
-    def test_profiles_no_repo(self, tmp_dir):
-        results = skfl._complete_profiles(None, None, "")
-        assert results == []
-
-    def test_profiles_returns_completion_items(self, repo_with_source):
-        from click.shell_completion import CompletionItem
-        repo = repo_with_source
-        self._make_profile(repo, "laptop")
-
-        results = skfl._complete_profiles(None, None, "")
-        assert all(isinstance(r, CompletionItem) for r in results)
-
-    def test_profiles_ignores_files_in_profiles_dir(self, repo_with_source):
-        # Only directories should be listed, not stray files
-        repo = repo_with_source
-        self._make_profile(repo, "work")
-        # Write a stray file directly in _profiles/
-        (repo / skfl.PATCHES_DIR / "_profiles" / "stray.txt").write_text("oops")
-
-        results = skfl._complete_profiles(None, None, "")
-        values = {r.value for r in results}
-        assert "work" in values
-        assert "stray.txt" not in values
-
     # ── _complete_packages ────────────────────────────────────────────
 
     def test_packages_returns_all_packages(self, repo):
@@ -1569,14 +1419,6 @@ class TestCompletionHelpers:
         # Just verify it doesn't raise and returns a list
         results = skfl._complete_patch_files(ctx, None, "")
         assert isinstance(results, list)
-
-    def test_profiles_respects_dash_C(self, repo_with_source, tmp_dir):
-        profiles_dir = repo_with_source / skfl.PATCHES_DIR / "_profiles" / "work"
-        profiles_dir.mkdir(parents=True, exist_ok=True)
-        ctx = self._make_ctx(repo_with_source)
-        results = skfl._complete_profiles(ctx, None, "")
-        values = {r.value for r in results}
-        assert "work" in values
 
     def test_packages_respects_dash_C(self, repo, tmp_dir):
         (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
@@ -1864,9 +1706,6 @@ class TestCompletionWiring:
 
     def test_package_build_name_wired(self):
         assert self._custom_complete(skfl.package_build, "name") is skfl._complete_packages
-
-    def test_package_build_profile_wired(self):
-        assert self._custom_complete(skfl.package_build, "profile") is skfl._complete_profiles
 
     def test_package_install_rsync_name_wired(self):
         assert self._custom_complete(skfl.package_install_rsync, "name") is skfl._complete_packages
