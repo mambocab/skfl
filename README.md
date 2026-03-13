@@ -14,6 +14,8 @@
 
 This is a lot of moving parts. `skfl` offers a layered interface onto these steps -- each can be performed in isolation, but common operations can be bundled together to make things easier. I aim for `skfl` to acknowledge fundamental complexity, like "you should read skills before you install them", and simplify everything else.
 
+I specifically am uninterested in streamlining the most important parts of the process, in which you apply your human understanding, judgement, risk-assessment, and problem-solving skills to the use of others' text in LLM products.
+
 I was inspired to write this by two things:
 
 - The fear of installing malicious skills, [of which there are many](https://arxiv.org/abs/2602.06547), and
