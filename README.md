@@ -6,13 +6,18 @@
 
 `skfl` is meant to streamline the process of
 
-- pulling skills from common repositories like GitHub repos,
-- asking you, a human with judgement and something to lose, to vet the files you want to use,
+- pulling skills from shared repositories like GitHub repos,
+- vetting skills with your human eyes and judgement,
 - managing a history of what you have and haven't read,
-- maintaining patches on top of skills for your own customization purposes, and, FINALLY,
+- maintaining patches on top of skills for your own customization purposes, and, finally,
 - actually "installing" those vetted (and optionally patched) files as skills in your home directory or in a repository.
 
-This is a lot of moving parts. `skfl` offers a layered interface onto these steps -- each can be performed in isolation, but common operations can be bundled together to make things easier. I can't promise they'll be _easy_, but I aim for `skfl` to acknowledge fundamental complexity and simplify everything else.
+This is a lot of moving parts. `skfl` offers a layered interface onto these steps -- each can be performed in isolation, but common operations can be bundled together to make things easier. I aim for `skfl` to acknowledge fundamental complexity, like "you should read skills before you install them", and simplify everything else.
+
+I was inspired to write this by two things:
+
+- The fear of installing malicious skills, [of which there are many](https://arxiv.org/abs/2602.06547), and
+- the desire to customize skills to my own needs, particularly by making them smaller.
 
 ### Installation
 
@@ -97,8 +102,8 @@ The core workflow for `skfl` is:
 - You manage a SOURCE or many SOURCES of files to use as skills -- specifying directories of skills you authored or pulling them from various remote sources.
 - Before using files from your sources, `skfl` requires that you VET them by reading them. With your squishy human eyeballs. You don't have to vet every file, but `skfl` will only let you use files that have been vetted.
 - You may optionally maintain PATCHES on top of vetted files. Patches let you customize skills to your own needs without modifying the source files directly, so your customizations survive source updates. You can maintain multiple patches per file; they are applied in order.
-- You may organize vetted files into PACKAGES — named, installable subsets of sources. A package declares which files it contains and where they should be installed. Building a package applies all patches and stages the results ready for installation.
-- Packages can be INSTALLED directly into different locations. `skfl` can be pointed explicitly at a target directory, but it also comes pre-programmed with the directory structure of a few of the popular agentic LLM products and can, for example, be told to install a Kiro Power or a Claude Agent in the appropriate directory.
+- You may organize vetted files into PACKAGES — named, installable subsets of sources. A package declares which files it contains and where they should be installed. Building a package applies all patches and stages the results ready for installation. These should be laid out the same way you want them laid out in the target, so if you want to configure both skills and agents in a `.claude` directory, your package should have top-level directories named `skills/` and `agents/`.
+- Packages can be INSTALLED directly into different locations. At time of writing you can use GNU Stow or `rsync` to do so.
 
 #### Repository
 
