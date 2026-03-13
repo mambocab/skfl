@@ -489,7 +489,7 @@ def _complete_packages(ctx, param, incomplete):
     return [
         CompletionItem(p.name)
         for p in sorted(packages_dir.iterdir())
-        if p.is_dir() and p.name.startswith(incomplete)
+        if p.is_dir() and (p / "package.toml").is_file() and p.name.startswith(incomplete)
     ]
 
 
@@ -957,7 +957,7 @@ def package_add(name, source_path, dest_path, patches):
         )
 
     source_abs = sources / rel
-    if not source_abs.exists():
+    if not source_abs.is_file():
         raise click.ClickException(f"Source not found: {source_abs}")
 
     for p in patches:

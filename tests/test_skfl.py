@@ -1363,7 +1363,9 @@ class TestCompletionHelpers:
 
     def test_packages_returns_all_packages(self, repo):
         (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "dotfiles" / "package.toml").write_text("")
         (repo / skfl.PACKAGES_DIR / "work-tools").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "work-tools" / "package.toml").write_text("")
         results = skfl._complete_packages(None, None, "")
         values = {r.value for r in results}
         assert "dotfiles" in values
@@ -1371,7 +1373,9 @@ class TestCompletionHelpers:
 
     def test_packages_filters_by_prefix(self, repo):
         (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "dotfiles" / "package.toml").write_text("")
         (repo / skfl.PACKAGES_DIR / "work-tools").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "work-tools" / "package.toml").write_text("")
         results = skfl._complete_packages(None, None, "dot")
         values = {r.value for r in results}
         assert "dotfiles" in values
@@ -1388,6 +1392,7 @@ class TestCompletionHelpers:
     def test_packages_returns_completion_items(self, repo):
         from click.shell_completion import CompletionItem
         (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "dotfiles" / "package.toml").write_text("")
         results = skfl._complete_packages(None, None, "")
         assert all(isinstance(r, CompletionItem) for r in results)
 
@@ -1415,6 +1420,7 @@ class TestCompletionHelpers:
 
     def test_packages_respects_dash_C(self, repo, tmp_dir):
         (repo / skfl.PACKAGES_DIR / "dotfiles").mkdir(parents=True, exist_ok=True)
+        (repo / skfl.PACKAGES_DIR / "dotfiles" / "package.toml").write_text("")
         ctx = self._make_ctx(repo)
         results = skfl._complete_packages(ctx, None, "")
         values = {r.value for r in results}
