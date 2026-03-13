@@ -525,63 +525,6 @@ def _complete_packages(ctx, param, incomplete):
     ]
 
 
-def do_stage_files(repo: Path, files: list[str], profile: str | None = None) -> None:
-    """Stage the given source files, optionally under a named profile."""
-    files = expand_paths(repo, files)
-    sources = repo / SOURCES_DIR
-    for fpath in files:
-        try:
-            rel = resolve_to_source_rel(repo, fpath)
-        except ValueError:
-            raise click.ClickException(
-                f"File {fpath} is not inside the sources directory."
-            )
-
-        source_path = sources / rel
-        if not source_path.is_file():
-            raise click.ClickException(f"Source file not found: {source_path}")
-
-        status = vet_status_for_file(repo, rel)
-        if status in ("unvetted", "modified"):
-            if not vet_single_file(repo, rel):
-                continue
-
-        if profile:
-            staged_path = repo / STAGED_DIR / profile / rel
-        else:
-            staged_path = repo / STAGED_DIR / rel
-        n_patches = _stage_single_file(repo, source_path, rel, staged_path, profile=profile)
-        patch_note = (
-            f" ({n_patches} patch{'es' if n_patches != 1 else ''} applied)"
-            if n_patches
-            else ""
-        )
-        profile_note = f" [profile: {profile}]" if profile else ""
-        click.echo(f"  staged: {rel}{patch_note}{profile_note}")
-
-
-# ── custom group for vet/stage that routes unknown args to a default command ──
-
-class DefaultCommandGroup(click.Group):
-    """A click Group that routes unknown subcommands to a default handler."""
-
-    def __init__(self, *args, default_handler=None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.default_handler = default_handler
-
-    def parse_args(self, ctx, args):
-        # If the first arg is not a known subcommand, prepend the default command name
-        if args and args[0] not in self.commands:
-            args = ["_default"] + list(args)
-        return super().parse_args(ctx, args)
-
-    def resolve_command(self, ctx, args):
-        cmd_name = args[0] if args else None
-        if cmd_name not in self.commands:
-            args = ["_default"] + list(args)
-        return super().resolve_command(ctx, args)
-
-
 # ── CLI ────────────────────────────────────────────────────────────────
 
 @click.group()
@@ -975,46 +918,6 @@ def patch_remove(patch_file):
     parent = patch_path.parent
     if parent.is_dir() and not any(parent.iterdir()):
         parent.rmdir()
-
-
-# ── stage ──────────────────────────────────────────────────────────────
-
-@cli.group(cls=DefaultCommandGroup, invoke_without_command=True)
-@click.pass_context
-def stage(ctx):
-    """Stage vetted files. Usage: skfl stage <files> | skfl stage list"""
-    if ctx.invoked_subcommand is None:
-        click.echo(ctx.get_help())
-
-
-@stage.command("_default", hidden=True)
-@click.option("--as", "profile", default=None, help="Stage under a named profile for variant installations.", shell_complete=_complete_profiles)
-@click.argument("files", nargs=-1, required=True, type=click.Path(), shell_complete=_complete_source_files)
-def stage_default(profile, files):
-    """Stage the specified source files."""
-    r = find_repo()
-    do_stage_files(r, list(files), profile=profile)
-
-
-@stage.command("list")
-@click.option("--as", "profile", default=None, help="List files staged under a named profile.", shell_complete=_complete_profiles)
-def stage_list(profile):
-    """Show currently staged files."""
-    r = find_repo()
-    if profile:
-        staged = r / STAGED_DIR / profile
-    else:
-        staged = r / STAGED_DIR
-    if not staged.is_dir():
-        click.echo("No staged files.")
-        return
-    found = False
-    for p in sorted(staged.rglob("*")):
-        if p.is_file() and p.name != ".gitkeep":
-            found = True
-            click.echo(f"  {p.relative_to(staged)}")
-    if not found:
-        click.echo("No staged files.")
 
 
 # ── package ────────────────────────────────────────────────────────────
