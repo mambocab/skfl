@@ -139,6 +139,22 @@ def patches_dir_for(repo: Path, rel: Path) -> Path:
     return Path(str(repo / PATCHES_DIR / rel) + ".d")
 
 
+def source_rel_for_patch(patch_str: str) -> Path | None:
+    """Derive the source-relative path from a repo-relative patch path.
+
+    Patch paths have the form: 30_patches/<source-rel>.d/<patch-name>.patch
+    Returns the source-relative path, or None if the path doesn't match the pattern.
+    """
+    parts = Path(patch_str).parts
+    if len(parts) < 3 or parts[0] != PATCHES_DIR:
+        return None
+    d_dir = parts[-2]
+    if not d_dir.endswith(".d"):
+        return None
+    source_parts = list(parts[1:-2]) + [d_dir[:-2]]
+    return Path(*source_parts)
+
+
 def list_patches_for(repo: Path, rel: Path) -> list[Path]:
     """List patches for a source file (files in its .d directory, sorted)."""
     patches = []
@@ -935,10 +951,16 @@ def package_list():
               shell_complete=_complete_patch_files,
               help="Patch to apply to this file (may be repeated, applied in order).")
 def package_add(name, source_path, dest_path, patches):
-    """Add a source file to a package.
+    """Add a source file (or directory) to a package.
 
     SOURCE_PATH is relative to 10_sources/.
     DEST_PATH is where the file appears at install time.
+
+    When SOURCE_PATH is a directory, all files within it are added
+    recursively. DEST_PATH is treated as a destination prefix and the
+    relative layout under SOURCE_PATH is preserved. Each --with-patch
+    argument is assigned to the file it belongs to based on its path
+    (30_patches/<source-rel>.d/<name>.patch).
     """
     r = find_repo()
     manifest_path = r / PACKAGES_DIR / name / "package.toml"
@@ -956,26 +978,80 @@ def package_add(name, source_path, dest_path, patches):
         )
 
     source_abs = sources / rel
-    if not source_abs.is_file():
-        raise click.ClickException(f"Source not found: {source_abs}")
 
-    for p in patches:
-        patch_path = r / p if not Path(p).is_absolute() else Path(p)
-        if not patch_path.is_file():
-            raise click.ClickException(f"Patch file not found: {p}")
-
-    entries = read_package_manifest(r, name)
-    if any(e["dest"] == dest_path for e in entries):
-        raise click.ClickException(
-            f"Destination '{dest_path}' already exists in package '{name}'."
+    if source_abs.is_dir():
+        dir_files = sorted(
+            p for p in source_abs.rglob("*")
+            if p.is_file() and p.name != ".gitkeep"
         )
+        if not dir_files:
+            raise click.ClickException(
+                f"Source directory '{rel}' contains no files."
+            )
 
-    entry: dict = {"source": str(rel), "dest": dest_path}
-    if patches:
-        entry["patches"] = list(patches)
-    entries.append(entry)
-    write_package_manifest(r, name, entries)
-    click.echo(f"  added: {dest_path} <- {rel}")
+        dest_prefix = dest_path.rstrip("/").rstrip("\\")
+        candidates = [
+            (p.relative_to(sources), f"{dest_prefix}/{p.relative_to(source_abs)}")
+            for p in dir_files
+        ]
+        candidate_sources = {str(sr) for sr, _ in candidates}
+
+        patches_by_source: dict[str, list[str]] = {}
+        for p in patches:
+            patch_path = r / p if not Path(p).is_absolute() else Path(p)
+            if not patch_path.is_file():
+                raise click.ClickException(f"Patch file not found: {p}")
+            src_for_patch = source_rel_for_patch(p)
+            if src_for_patch is None:
+                raise click.ClickException(
+                    f"Cannot determine source file for patch '{p}'. "
+                    f"Expected path of the form {PATCHES_DIR}/<source-path>.d/<name>.patch"
+                )
+            if str(src_for_patch) not in candidate_sources:
+                raise click.ClickException(
+                    f"Patch '{p}' belongs to '{src_for_patch}' which is not in directory '{rel}'."
+                )
+            patches_by_source.setdefault(str(src_for_patch), []).append(p)
+
+        entries = read_package_manifest(r, name)
+        existing_dests = {e["dest"] for e in entries}
+        for source_rel, dest_str in candidates:
+            if dest_str in existing_dests:
+                raise click.ClickException(
+                    f"Destination '{dest_str}' already exists in package '{name}'."
+                )
+
+        for source_rel, dest_str in candidates:
+            entry: dict = {"source": str(source_rel), "dest": dest_str}
+            file_patches = patches_by_source.get(str(source_rel))
+            if file_patches:
+                entry["patches"] = file_patches
+            entries.append(entry)
+        write_package_manifest(r, name, entries)
+        for source_rel, dest_str in candidates:
+            click.echo(f"  added: {dest_str} <- {source_rel}")
+
+    elif source_abs.is_file():
+        for p in patches:
+            patch_path = r / p if not Path(p).is_absolute() else Path(p)
+            if not patch_path.is_file():
+                raise click.ClickException(f"Patch file not found: {p}")
+
+        entries = read_package_manifest(r, name)
+        if any(e["dest"] == dest_path for e in entries):
+            raise click.ClickException(
+                f"Destination '{dest_path}' already exists in package '{name}'."
+            )
+
+        entry: dict = {"source": str(rel), "dest": dest_path}
+        if patches:
+            entry["patches"] = list(patches)
+        entries.append(entry)
+        write_package_manifest(r, name, entries)
+        click.echo(f"  added: {dest_path} <- {rel}")
+
+    else:
+        raise click.ClickException(f"Source not found: {source_abs}")
 
 
 @package.command("show")

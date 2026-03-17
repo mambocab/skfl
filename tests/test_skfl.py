@@ -1030,6 +1030,167 @@ class TestPackageAdd:
         )
         assert result.exit_code != 0
 
+    def test_add_directory_adds_all_files(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src", "skills"],
+        )
+        assert result.exit_code == 0, result.output
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        assert len(entries) == 3
+        sources = {e["source"] for e in entries}
+        dests = {e["dest"] for e in entries}
+        assert sources == {
+            "custom/test-src/hello.md",
+            "custom/test-src/script.py",
+            "custom/test-src/sub/nested.txt",
+        }
+        assert dests == {
+            "skills/hello.md",
+            "skills/script.py",
+            "skills/sub/nested.txt",
+        }
+        for e in entries:
+            assert "patches" not in e
+
+    def test_add_directory_preserves_subdirectory_structure(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        runner.invoke(skfl.cli, ["package", "add", "mypkg", "custom/test-src", "skills"])
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        nested = next(e for e in entries if "nested" in e["source"])
+        assert nested["source"] == "custom/test-src/sub/nested.txt"
+        assert nested["dest"] == "skills/sub/nested.txt"
+
+    def test_add_directory_trailing_slash_normalised(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src/", "skills/"],
+        )
+        assert result.exit_code == 0, result.output
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        for e in entries:
+            assert "//" not in e["dest"]
+        dests = {e["dest"] for e in entries}
+        assert "skills/hello.md" in dests
+
+    def _make_patch(self, repo, source_rel):
+        """Create a minimal patch file in the correct location for source_rel."""
+        pdir = skfl.patches_dir_for(repo, Path(source_rel))
+        pdir.mkdir(parents=True, exist_ok=True)
+        patch_file = pdir / "test.patch"
+        patch_file.write_text("--- a/f\n+++ b/f\n@@ -1 +1 @@\n-old\n+new\n")
+        return str(patch_file.relative_to(repo))
+
+    def test_add_directory_with_patch_assigns_to_correct_file(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        patch_rel = self._make_patch(repo_with_source, "custom/test-src/hello.md")
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src", "skills",
+             "--with-patch", patch_rel],
+        )
+        assert result.exit_code == 0, result.output
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        hello = next(e for e in entries if e["source"] == "custom/test-src/hello.md")
+        assert hello["patches"] == [patch_rel]
+        for e in entries:
+            if e["source"] != "custom/test-src/hello.md":
+                assert "patches" not in e
+
+    def test_add_directory_with_multiple_patches_different_files(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        patch1 = self._make_patch(repo_with_source, "custom/test-src/hello.md")
+        patch2 = self._make_patch(repo_with_source, "custom/test-src/script.py")
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src", "skills",
+             "--with-patch", patch1, "--with-patch", patch2],
+        )
+        assert result.exit_code == 0, result.output
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        by_source = {e["source"]: e for e in entries}
+        assert by_source["custom/test-src/hello.md"]["patches"] == [patch1]
+        assert by_source["custom/test-src/script.py"]["patches"] == [patch2]
+        assert "patches" not in by_source["custom/test-src/sub/nested.txt"]
+
+    def test_add_directory_patch_outside_directory_fails(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        other_src = repo_with_source / skfl.SOURCES_DIR / "custom" / "other" / "file.md"
+        other_src.parent.mkdir(parents=True, exist_ok=True)
+        other_src.write_text("other\n")
+        patch_rel = self._make_patch(repo_with_source, "custom/other/file.md")
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src", "skills",
+             "--with-patch", patch_rel],
+        )
+        assert result.exit_code != 0
+        assert "not in directory" in result.output
+
+    def test_add_directory_patch_bad_path_fails(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        bad_patch = repo_with_source / "30_patches" / "stray.patch"
+        bad_patch.parent.mkdir(parents=True, exist_ok=True)
+        bad_patch.write_text("--- a\n+++ b\n")
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src", "skills",
+             "--with-patch", str(bad_patch.relative_to(repo_with_source))],
+        )
+        assert result.exit_code != 0
+        assert "Cannot determine source file" in result.output
+
+    def test_add_directory_empty_fails(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        empty_dir = repo_with_source / skfl.SOURCES_DIR / "custom" / "empty-src"
+        empty_dir.mkdir(parents=True, exist_ok=True)
+        (empty_dir / ".gitkeep").write_text("")
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/empty-src", "skills"],
+        )
+        assert result.exit_code != 0
+        assert "no files" in result.output
+
+    def test_add_directory_duplicate_dest_fails(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
+        )
+        result = runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src", "skills"],
+        )
+        assert result.exit_code != 0
+        assert "already exists" in result.output
+        assert "skills/hello.md" in result.output
+
+    def test_add_directory_manifest_unchanged_on_duplicate(self, repo_with_source):
+        runner = CliRunner()
+        runner.invoke(skfl.cli, ["package", "create", "mypkg"])
+        runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src/hello.md", "skills/hello.md"],
+        )
+        runner.invoke(
+            skfl.cli,
+            ["package", "add", "mypkg", "custom/test-src", "skills"],
+        )
+        entries = skfl.read_package_manifest(repo_with_source, "mypkg")
+        assert len(entries) == 1
+
 
 # ── package build ─────────────────────────────────────────────────────
 
